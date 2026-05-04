@@ -34,12 +34,31 @@ type Projected = { sx: number; sy: number; depth: number; visible: boolean };
 const NEAR_PLANE = 0.5;
 const SEGMENTS_AHEAD = 90;
 const SEGMENTS_BEHIND = 4;
-const ROT_LERP = 0.18;
+/** Decay constant for the camera-heading low-pass filter (per second). */
+const CAM_HEADING_DECAY = 8;
+/** Decay constant for the minimap-heading low-pass filter (per second). */
+const MINIMAP_HEADING_DECAY = 6;
+/** Decay constant for the per-ship bank smoother (per second). */
+const SHIP_BANK_DECAY = 9;
 const INTERP_DELAY_MS = 80;
 const GRID_SIZE = 80;
 const FOG_START = 60;
 const FOG_END = 480;
 const STAR_COUNT = 80;
+
+/** Frame-rate-independent low-pass filter: returns the new value moving toward
+ *  `target` with the given per-second decay constant `k`. */
+const lpf = (current: number, target: number, k: number, dt: number): number => {
+  const t = 1 - Math.exp(-k * Math.max(dt, 0));
+  return current + (target - current) * t;
+};
+
+/** Same as lpf but for an angle, taking the shortest direction. */
+const lpfAngle = (current: number, target: number, k: number, dt: number): number => {
+  const delta = wrapAngle(target - current);
+  const t = 1 - Math.exp(-k * Math.max(dt, 0));
+  return current + delta * t;
+};
 
 const interpolate = (
   prev: ShipSnapshot | undefined,
@@ -113,6 +132,7 @@ type ShipMemory = {
 export class RenderState {
   private trails = new Map<string, { x: number; y: number }[]>();
   private smoothedHeading: number | null = null;
+  private smoothedMinimapHeading: number | null = null;
   private stars: { x: number; y: number; r: number; tw: number }[] | null = null;
   private memories = new Map<string, ShipMemory>();
   private particles: Particle[] = [];
@@ -134,14 +154,27 @@ export class RenderState {
     return this.trails.get(id) ?? [];
   }
 
-  smoothHeading(target: number): number {
+  smoothHeading(target: number, dt: number): number {
     if (this.smoothedHeading === null) {
       this.smoothedHeading = target;
       return target;
     }
-    const delta = wrapAngle(target - this.smoothedHeading);
-    this.smoothedHeading = this.smoothedHeading + delta * ROT_LERP;
+    this.smoothedHeading = lpfAngle(this.smoothedHeading, target, CAM_HEADING_DECAY, dt);
     return this.smoothedHeading;
+  }
+
+  smoothMinimapHeading(target: number, dt: number): number {
+    if (this.smoothedMinimapHeading === null) {
+      this.smoothedMinimapHeading = target;
+      return target;
+    }
+    this.smoothedMinimapHeading = lpfAngle(
+      this.smoothedMinimapHeading,
+      target,
+      MINIMAP_HEADING_DECAY,
+      dt,
+    );
+    return this.smoothedMinimapHeading;
   }
 
   /** Returns smoothed bank for the ship (radians) given its current heading. */
@@ -159,10 +192,9 @@ export class RenderState {
       return mem;
     }
     const headingDelta = wrapAngle(heading - mem.prevHeading);
-    // Bank target: -headingDelta proportional to angular speed (rad/s), capped.
     const angVel = dtSec > 0 ? headingDelta / dtSec : 0;
     const target = Math.max(-0.45, Math.min(0.45, angVel * 0.18));
-    mem.bank = mem.bank + (target - mem.bank) * 0.25;
+    mem.bank = lpf(mem.bank, target, SHIP_BANK_DECAY, dtSec);
     mem.prevHeading = heading;
     if (isKo && mem.koAt === null) mem.koAt = raceTime;
     if (!isKo) mem.koAt = null;
@@ -464,92 +496,103 @@ const drawTrack = (
     segIndices.push(idx);
   }
 
-  // Build clipped quads: if any corner is invisible, clip the corresponding
-  // edge segment against the near plane.
-  type Quad = {
-    depth: number;
-    aL: { sx: number; sy: number };
-    bL: { sx: number; sy: number };
-    bR: { sx: number; sy: number };
-    aR: { sx: number; sy: number };
+  // Build per-segment clipped corners. Each "rib" is a (left, right) pair.
+  type Rib = {
+    L: { sx: number; sy: number; depth: number };
+    R: { sx: number; sy: number; depth: number };
     fromIdx: number;
   };
-  const quads: Quad[] = [];
-  for (let i = 0; i < projL.length - 1; i++) {
-    const aL = projL[i] as EdgePoint;
-    const bL = projL[i + 1] as EdgePoint;
-    const aR = projR[i] as EdgePoint;
-    const bR = projR[i + 1] as EdgePoint;
-    // Skip if all four are behind.
-    if (!aL.visible && !bL.visible && !aR.visible && !bR.visible) continue;
-    // Clip left edge.
-    const segL =
-      aL.visible && bL.visible
-        ? { a: aL, b: bL }
-        : projectSegment(aL.wx, aL.wy, bL.wx, bL.wy, cam, cfg, width);
-    const segR =
-      aR.visible && bR.visible
-        ? { a: aR, b: bR }
-        : projectSegment(aR.wx, aR.wy, bR.wx, bR.wy, cam, cfg, width);
-    if (!segL || !segR) continue;
-    const depth = (segL.a.depth + segL.b.depth + segR.a.depth + segR.b.depth) / 4;
-    quads.push({
-      depth,
-      aL: segL.a,
-      bL: segL.b,
-      aR: segR.a,
-      bR: segR.b,
-      fromIdx: segIndices[i] as number,
-    });
+  const ribs: Rib[] = [];
+  for (let i = 0; i < projL.length; i++) {
+    const lp = projL[i] as EdgePoint;
+    const rp = projR[i] as EdgePoint;
+    if (lp.visible && rp.visible) {
+      ribs.push({
+        L: { sx: lp.sx, sy: lp.sy, depth: lp.depth },
+        R: { sx: rp.sx, sy: rp.sy, depth: rp.depth },
+        fromIdx: segIndices[i] as number,
+      });
+    }
+    // If either side is behind near plane we skip this rib (the previous
+    // visible rib already provided a clipped boundary via its successor).
   }
-  // Far → near so closer covers farther.
-  quads.sort((a, b) => b.depth - a.depth);
+  if (ribs.length < 2) return;
 
-  for (const q of quads) {
-    const fa = fogAlpha(q.depth);
-    if (fa <= 0.01) continue;
+  // Single contiguous polygon: walk left edge forward (near→far), then walk
+  // right edge backward (far→near). This eliminates the visible seams that
+  // appear when adjacent quads are filled separately.
+  ctx.fillStyle = '#2c1a5a';
+  ctx.beginPath();
+  for (let i = 0; i < ribs.length; i++) {
+    const r = ribs[i] as Rib;
+    if (i === 0) ctx.moveTo(r.L.sx, r.L.sy);
+    else ctx.lineTo(r.L.sx, r.L.sy);
+  }
+  for (let i = ribs.length - 1; i >= 0; i--) {
+    const r = ribs[i] as Rib;
+    ctx.lineTo(r.R.sx, r.R.sy);
+  }
+  ctx.closePath();
+  ctx.fill();
 
-    // Track surface: bright enough to read against the synthwave grid.
-    const surfaceShade = (q.fromIdx & 1) === 0 ? '#2c1a5a' : '#36206e';
-    ctx.fillStyle = surfaceShade;
-    ctx.globalAlpha = fa;
+  // Subtle alternating rib shading on top of the base fill — gives a sense
+  // of motion without visible seams.
+  for (let i = 0; i < ribs.length - 1; i++) {
+    const a = ribs[i] as Rib;
+    const b = ribs[i + 1] as Rib;
+    if ((a.fromIdx & 1) !== 0) continue;
+    const depth = (a.L.depth + a.R.depth + b.L.depth + b.R.depth) / 4;
+    const fa = fogAlpha(depth);
+    if (fa <= 0.02) continue;
+    ctx.fillStyle = `rgba(54, 32, 110, ${fa * 0.55})`;
     ctx.beginPath();
-    ctx.moveTo(q.aL.sx, q.aL.sy);
-    ctx.lineTo(q.bL.sx, q.bL.sy);
-    ctx.lineTo(q.bR.sx, q.bR.sy);
-    ctx.lineTo(q.aR.sx, q.aR.sy);
+    ctx.moveTo(a.L.sx, a.L.sy);
+    ctx.lineTo(b.L.sx, b.L.sy);
+    ctx.lineTo(b.R.sx, b.R.sy);
+    ctx.lineTo(a.R.sx, a.R.sy);
     ctx.closePath();
     ctx.fill();
-    ctx.globalAlpha = 1;
+  }
 
-    // Edge stripes (cyan + magenta) with depth-attenuated width and alpha.
-    const edgeAlpha = fa * Math.max(0.35, 1 - q.depth / 220);
-    const edgeWidth = Math.max(1, 3 - q.depth / 80);
-    ctx.lineWidth = edgeWidth;
-    ctx.strokeStyle = `rgba(255, 58, 209, ${edgeAlpha})`;
-    ctx.beginPath();
-    ctx.moveTo(q.aL.sx, q.aL.sy);
-    ctx.lineTo(q.bL.sx, q.bL.sy);
-    ctx.stroke();
-    ctx.strokeStyle = `rgba(58, 255, 225, ${edgeAlpha})`;
-    ctx.beginPath();
-    ctx.moveTo(q.aR.sx, q.aR.sy);
-    ctx.lineTo(q.bR.sx, q.bR.sy);
-    ctx.stroke();
-
-    // Centre lane stripe (every other segment).
-    if ((q.fromIdx & 1) === 0) {
-      const m1x = (q.aL.sx + q.aR.sx) / 2;
-      const m1y = (q.aL.sy + q.aR.sy) / 2;
-      const m2x = (q.bL.sx + q.bR.sx) / 2;
-      const m2y = (q.bL.sy + q.bR.sy) / 2;
-      ctx.strokeStyle = `rgba(255, 255, 255, ${edgeAlpha * 0.45})`;
-      ctx.lineWidth = Math.max(1, 2.5 - q.depth / 100);
+  // Edge stripes — single polyline per side, depth-attenuated alpha along.
+  for (const side of [-1, 1] as const) {
+    const color = side === -1 ? 'rgba(255, 58, 209,' : 'rgba(58, 255, 225,';
+    for (let i = 0; i < ribs.length - 1; i++) {
+      const a = ribs[i] as Rib;
+      const b = ribs[i + 1] as Rib;
+      const aP = side === -1 ? a.R : a.L;
+      const bP = side === -1 ? b.R : b.L;
+      const depth = (a.L.depth + b.L.depth) / 2;
+      const fa = fogAlpha(depth);
+      if (fa <= 0.02) continue;
+      const edgeAlpha = fa * Math.max(0.35, 1 - depth / 220);
+      ctx.lineWidth = Math.max(1, 3 - depth / 80);
+      ctx.strokeStyle = `${color} ${edgeAlpha})`;
       ctx.beginPath();
-      ctx.moveTo(m1x, m1y);
-      ctx.lineTo(m2x, m2y);
+      ctx.moveTo(aP.sx, aP.sy);
+      ctx.lineTo(bP.sx, bP.sy);
       ctx.stroke();
     }
+  }
+
+  // Centre dashed lane stripe — every other rib pair.
+  for (let i = 0; i < ribs.length - 1; i++) {
+    const a = ribs[i] as Rib;
+    const b = ribs[i + 1] as Rib;
+    if ((a.fromIdx & 1) !== 0) continue;
+    const depth = (a.L.depth + b.L.depth) / 2;
+    const fa = fogAlpha(depth);
+    if (fa <= 0.02) continue;
+    const m1x = (a.L.sx + a.R.sx) / 2;
+    const m1y = (a.L.sy + a.R.sy) / 2;
+    const m2x = (b.L.sx + b.R.sx) / 2;
+    const m2y = (b.L.sy + b.R.sy) / 2;
+    ctx.strokeStyle = `rgba(255, 255, 255, ${fa * Math.max(0.3, 1 - depth / 220) * 0.5})`;
+    ctx.lineWidth = Math.max(1, 2.5 - depth / 100);
+    ctx.beginPath();
+    ctx.moveTo(m1x, m1y);
+    ctx.lineTo(m2x, m2y);
+    ctx.stroke();
   }
 
   // Start/finish line (drawn after surface so it sits on top).
@@ -604,8 +647,8 @@ const drawShip = (
   const pivot = project(ship.x, ship.y, cam, cfg, width);
   if (!pivot.visible) return;
 
-  const fa0 = fogAlpha(pivot.depth);
-  if (fa0 <= 0.02) return;
+  const fogA = fogAlpha(pivot.depth);
+  if (fogA <= 0.02) return;
 
   // KO fade-out: ship shrinks + spins + fades over KO_ANIM_S.
   let koProgress = 0;
@@ -613,11 +656,17 @@ const drawShip = (
     koProgress = Math.min(1, koElapsed / KO_ANIM_S);
     if (koProgress >= 1) return; // gone
   }
-  const fa = fa0 * (1 - koProgress);
 
   const baseSize = isMe ? 22 : 17;
-  let size = Math.max(2.5, Math.min(baseSize, (cfg.focal * 2.4) / pivot.depth));
+  const rawSize = Math.min(baseSize, (cfg.focal * 2.4) / pivot.depth);
+  // When the projected size dips below ~4 px the ship looks like a flickery
+  // dot — fade the alpha proportionally so it disappears smoothly rather than
+  // aliasing in/out at the horizon.
+  const sizeFade = Math.max(0, Math.min(1, (rawSize - 1.5) / 4));
+  let size = Math.max(2.5, rawSize);
   if (ko) size *= 1 - koProgress * 0.6;
+  const fa = fogA * sizeFade * (1 - koProgress);
+  if (fa <= 0.02) return;
   const relHeading = wrapAngle(ship.h - cam.heading) + (ko ? koElapsed * 6 : 0);
 
   // Ground shadow under the ship (an oval).
@@ -726,12 +775,18 @@ export const renderFrame = (
 
   const me = state.myId ? ships.get(state.myId) : undefined;
   if (!me) {
+    // Reset the per-frame timer so the first in-race frame doesn't see a giant dt.
+    rstate.consumeDt(nowMs);
     drawOverview(rc, track, state, ships);
     return;
   }
 
+  // Per-frame dt up front so all smoothing is dt-aware.
+  const dtSec = rstate.consumeDt(nowMs) / 1000;
+  const raceTime = state.snapshots[state.snapshots.length - 1]?.time ?? 0;
+
   const targetHeading = me.h;
-  const heading = rstate.smoothHeading(targetHeading);
+  const heading = rstate.smoothHeading(targetHeading, dtSec);
   const cosH = Math.cos(heading);
   const sinH = Math.sin(heading);
 
@@ -751,10 +806,6 @@ export const renderFrame = (
   drawGrid(rc, cam, cfg);
   const closest = closestOnTrack(track, { x: me.x, y: me.y });
   drawTrack(rc, track, cam, cfg, closest.segIdx);
-
-  // Per-frame dt + race time for ship memory + particles.
-  const dtSec = rstate.consumeDt(nowMs) / 1000;
-  const raceTime = state.snapshots[state.snapshots.length - 1]?.time ?? 0;
 
   // Update ship memories once + spawn boost particles for boosting ships.
   const memMap = new Map<string, ReturnType<typeof rstate.updateShipMemory>>();
@@ -852,8 +903,10 @@ const drawOverview = (
 export const renderMinimap = (
   ctx: CanvasRenderingContext2D,
   state: ClientState,
+  rstate: RenderState,
   width: number,
   height: number,
+  dtSec: number,
 ): void => {
   ctx.clearRect(0, 0, width, height);
   const track = findTrack(state.trackId);
@@ -872,8 +925,9 @@ export const renderMinimap = (
   ctx.save();
   ctx.translate(width / 2, height / 2);
   if (me) {
-    // Rotate so the player's heading points to the top of the minimap.
-    ctx.rotate(-me.h - Math.PI / 2);
+    const target = -me.h - Math.PI / 2;
+    const smoothed = rstate.smoothMinimapHeading(target, dtSec);
+    ctx.rotate(smoothed);
   }
   // Track is drawn centred on the camera (player) when known, else on the
   // track centre.

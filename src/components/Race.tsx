@@ -89,7 +89,9 @@ export function Race({ state, dispatch, socket, onLeave }: Props) {
       const ctx = mm.getContext('2d');
       if (ctx) {
         ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-        renderMinimap(ctx, state, rect.width, rect.height);
+        // Approx dt for the minimap smoother — we don't need to be exact, the
+        // rAF spacing is consistent and the renderer already consumed dt.
+        renderMinimap(ctx, state, renderRef.current, rect.width, rect.height, 1 / 60);
       }
     }
 

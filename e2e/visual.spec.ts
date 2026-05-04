@@ -175,6 +175,35 @@ test('attack key presses surface visual FX overlays', async ({ page }) => {
   await expect(page.getByTestId('fx-side')).toBeVisible({ timeout: 500 });
 });
 
+test('track surface renders as a solid purple region in the foreground', async ({ page }) => {
+  await enterRace(page, 'surface');
+  // Wait until the race actually starts — fast=1 lobby is 2s + 3s countdown.
+  await page.waitForTimeout(5500);
+
+  // The continuous track polygon uses #2c1a5a (~44,26,90) with the alternating
+  // ribbon shading on top. Sample a grid of points in the lower-half of the
+  // screen and assert we hit purple pixels across the visible track region.
+  const samples = await Promise.all(
+    [
+      [0.45, 0.55],
+      [0.5, 0.58],
+      [0.55, 0.6],
+      [0.6, 0.62],
+      [0.65, 0.65],
+      [0.7, 0.68],
+      [0.75, 0.7],
+      [0.8, 0.72],
+    ].map(([x, y]) => samplePixel(page, x as number, y as number)),
+  );
+  const purpleHits = samples.filter(
+    (s) => s.r >= 20 && s.r <= 110 && s.g >= 5 && s.g <= 70 && s.b >= 55 && s.b <= 150,
+  ).length;
+  expect(
+    purpleHits,
+    `expected at least 1 purple track pixel (got ${samples.map((s) => `(${s.r},${s.g},${s.b})`).join(' ')})`,
+  ).toBeGreaterThanOrEqual(1);
+});
+
 test('60fps target: at least 200 frames in 5 seconds of racing', async ({ page }) => {
   await enterRace(page, 'fps');
   await page.waitForTimeout(4000);
