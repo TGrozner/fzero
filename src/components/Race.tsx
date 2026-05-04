@@ -42,6 +42,7 @@ export function Race({ state, dispatch, socket, onLeave }: Props) {
       if (e.repeat) return;
       if (e.code === 'Enter') {
         setSpinFlash(true);
+        renderRef.current.triggerLocalSpin(performance.now());
         if (spinTimer) clearTimeout(spinTimer);
         spinTimer = window.setTimeout(() => setSpinFlash(false), 240);
       } else if (e.code === 'KeyQ' || e.code === 'KeyE') {

@@ -137,6 +137,21 @@ export class RenderState {
   private memories = new Map<string, ShipMemory>();
   private particles: Particle[] = [];
   private lastFrameMs: number | null = null;
+  /** Performance.now() at which the local player triggered a spin attack. */
+  private localSpinAt: number | null = null;
+
+  /** Mark a local spin attack starting at `nowMs` (client-side prediction). */
+  triggerLocalSpin(nowMs: number): void {
+    this.localSpinAt = nowMs;
+  }
+
+  /** Returns 0..1 progress of the local spin animation, or null if inactive. */
+  localSpinProgress(nowMs: number, durationMs: number): number | null {
+    if (this.localSpinAt === null) return null;
+    const t = (nowMs - this.localSpinAt) / durationMs;
+    if (t < 0 || t > 1) return null;
+    return t;
+  }
 
   updateTrails(ships: Map<string, { x: number; y: number }>) {
     for (const [id, pos] of ships) {
@@ -828,11 +843,25 @@ export const renderFrame = (
   const cosH = Math.cos(heading);
   const sinH = Math.sin(heading);
 
+  // Speed factor used to drive the speed-feel effects.
+  const REF_SPEED = 280;
+  const speedNorm = Math.max(0, Math.min(1, Math.hypot(me.vx, me.vy) / REF_SPEED));
+
+  // Subtle vertical bob synced to speed: at full speed the camera dips
+  // ~1.5px each cycle, which is enough to register as motion without
+  // smearing the rest of the frame.
+  const bob = Math.sin(nowMs * 0.022) * speedNorm * 1.5;
+
   const cfg: CamConfig = {
-    height: 14,
-    distBehind: 28,
+    // Camera drops slightly closer to the ground at high speed (more dramatic
+    // perspective on the track surface rushing forward).
+    height: 14 * (1 - speedNorm * 0.22),
+    // Pull the camera in a touch when going fast — the player feels the ship
+    // gain on the screen rather than sit at a fixed distance.
+    distBehind: 28 * (1 - speedNorm * 0.18),
     focal: Math.max(280, Math.min(width, height) * 0.5),
-    horizonY: height * 0.42,
+    // Horizon dips slightly with speed + bob, exaggerating forward motion.
+    horizonY: height * 0.42 + speedNorm * 14 + bob,
   };
   const cam: CamPose = {
     posX: me.x - cosH * cfg.distBehind,
@@ -862,6 +891,12 @@ export const renderFrame = (
 
   drawParticles(rc, rstate, cam, cfg);
 
+  // Local spin attack: rotate the player's ship a full turn over the spin
+  // duration so the strike actually reads as a spin rather than a flash.
+  const SPIN_VIS_MS = 420;
+  const localSpinT = rstate.localSpinProgress(nowMs, SPIN_VIS_MS);
+  const localSpinAngle = localSpinT !== null ? localSpinT * Math.PI * 2 : 0;
+
   const projected = [...ships.entries()].map(([id, s]) => {
     const p = project(s.x, s.y, cam, cfg, width);
     return { id, ship: s, depth: p.depth };
@@ -871,7 +906,71 @@ export const renderFrame = (
     const mem = memMap.get(id);
     if (!mem) continue;
     const koElapsed = mem.koAt !== null ? raceTime - mem.koAt : -1;
-    drawShip(rc, cam, cfg, ship, state.players[id], id === state.myId, nowMs, mem.bank, koElapsed);
+    const isMe = id === state.myId;
+    const drawn = isMe && localSpinT !== null ? { ...ship, h: ship.h + localSpinAngle } : ship;
+    // While spinning, suppress the bank shear so the rotation reads as a clean
+    // pivot around the ship's pivot rather than a wobbly skid.
+    const bank = isMe && localSpinT !== null ? 0 : mem.bank;
+    drawShip(rc, cam, cfg, drawn, state.players[id], isMe, nowMs, bank, koElapsed);
+  }
+
+  drawSpeedFx(rc, cfg.horizonY, speedNorm, nowMs);
+};
+
+const drawSpeedFx = (
+  rc: RenderContext,
+  horizonY: number,
+  speedNorm: number,
+  nowMs: number,
+): void => {
+  const { ctx, width, height } = rc;
+
+  // Vignette: edges darken with speed, gives a tunnel-vision feel.
+  if (speedNorm > 0.05) {
+    const vGrad = ctx.createRadialGradient(
+      width / 2,
+      horizonY + (height - horizonY) * 0.25,
+      Math.min(width, height) * 0.18,
+      width / 2,
+      horizonY + (height - horizonY) * 0.25,
+      Math.max(width, height) * 0.65,
+    );
+    vGrad.addColorStop(0, 'rgba(0, 0, 0, 0)');
+    vGrad.addColorStop(1, `rgba(0, 0, 0, ${0.35 * speedNorm})`);
+    ctx.fillStyle = vGrad;
+    ctx.fillRect(0, 0, width, height);
+  }
+
+  // Radial speed streaks emanating from the vanishing point. We use a low
+  // streak count + per-frame jitter (rather than a persistent particle
+  // system) because the eye reads the radial motion, not individual lines.
+  if (speedNorm < 0.18) return;
+  const cx = width / 2;
+  const cy = horizonY;
+  const count = Math.floor(14 + speedNorm * 26);
+  ctx.strokeStyle = `rgba(255, 255, 255, ${0.18 + speedNorm * 0.32})`;
+  ctx.lineWidth = 1.2;
+  ctx.lineCap = 'round';
+  for (let i = 0; i < count; i++) {
+    // Pseudo-random angle, tied to streak index, slowly rotating.
+    const a = (i * 2.399963 + nowMs * 0.0008 * (0.6 + speedNorm)) % (Math.PI * 2);
+    const phase = (nowMs * (0.6 + speedNorm * 1.4) + i * 173) % 720;
+    const r0 = 80 + phase;
+    const r1 = r0 + 40 + speedNorm * 80;
+    const cosA = Math.cos(a);
+    const sinA = Math.sin(a);
+    const x0 = cx + cosA * r0;
+    const y0 = cy + sinA * r0;
+    const x1 = cx + cosA * r1;
+    const y1 = cy + sinA * r1;
+    // Skip streaks that fall above the horizon (no point streaking the sky).
+    if (y0 < horizonY - 12 && y1 < horizonY - 12) continue;
+    if ((x0 < -20 && x1 < -20) || (x0 > width + 20 && x1 > width + 20)) continue;
+    if (y0 > height + 20 && y1 > height + 20) continue;
+    ctx.beginPath();
+    ctx.moveTo(x0, y0);
+    ctx.lineTo(x1, y1);
+    ctx.stroke();
   }
 };
 
