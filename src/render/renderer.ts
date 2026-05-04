@@ -16,13 +16,9 @@ export type RenderContext = {
 
 /** Pseudo-3D camera (Mode 7-style) parameters. */
 type CamConfig = {
-  /** Camera height above ground. */
   height: number;
-  /** Distance the camera sits behind the ship. */
   distBehind: number;
-  /** Focal length in pixels. Larger = narrower FOV. */
   focal: number;
-  /** Screen Y coord of the horizon. */
   horizonY: number;
 };
 
@@ -36,10 +32,14 @@ type CamPose = {
 type Projected = { sx: number; sy: number; depth: number; visible: boolean };
 
 const NEAR_PLANE = 0.5;
-const SEGMENTS_AHEAD = 80;
-const SEGMENTS_BEHIND = 2;
+const SEGMENTS_AHEAD = 90;
+const SEGMENTS_BEHIND = 4;
 const ROT_LERP = 0.18;
 const INTERP_DELAY_MS = 80;
+const GRID_SIZE = 80;
+const FOG_START = 60;
+const FOG_END = 480;
+const STAR_COUNT = 80;
 
 const interpolate = (
   prev: ShipSnapshot | undefined,
@@ -89,10 +89,12 @@ export const computeInterpolatedShips = (
   return out;
 };
 
-/** Persistent render state: trails + smoothed camera heading. */
+/** Persistent render state: trails + smoothed camera heading + starfield. */
 export class RenderState {
   private trails = new Map<string, { x: number; y: number }[]>();
   private smoothedHeading: number | null = null;
+  /** Stars are sampled once and reused (parallax-fixed). */
+  private stars: { x: number; y: number; r: number; tw: number }[] | null = null;
 
   updateTrails(ships: Map<string, { x: number; y: number }>) {
     for (const [id, pos] of ships) {
@@ -120,9 +122,31 @@ export class RenderState {
     return this.smoothedHeading;
   }
 
+  ensureStars(width: number, horizonY: number): { x: number; y: number; r: number; tw: number }[] {
+    if (this.stars && this.stars.length > 0) return this.stars;
+    const arr: { x: number; y: number; r: number; tw: number }[] = [];
+    // Deterministic-ish noise so stars don't change per frame.
+    let s = 1337;
+    const rng = () => {
+      s = (s * 1103515245 + 12345) & 0x7fffffff;
+      return s / 0x7fffffff;
+    };
+    for (let i = 0; i < STAR_COUNT; i++) {
+      arr.push({
+        x: rng() * width,
+        y: rng() * (horizonY - 4),
+        r: 0.5 + rng() * 1.4,
+        tw: rng() * Math.PI * 2,
+      });
+    }
+    this.stars = arr;
+    return arr;
+  }
+
   reset(): void {
     this.trails.clear();
     this.smoothedHeading = null;
+    this.stars = null;
   }
 }
 
@@ -148,45 +172,180 @@ const project = (
   const dy = worldY - cam.posY;
   const cosH = Math.cos(cam.heading);
   const sinH = Math.sin(cam.heading);
-  const z = dx * cosH + dy * sinH; // forward distance
+  const z = dx * cosH + dy * sinH;
   if (z <= NEAR_PLANE) return { sx: 0, sy: 0, depth: z, visible: false };
-  const x = -dx * sinH + dy * cosH; // lateral
+  const x = -dx * sinH + dy * cosH;
   const sx = screenW / 2 + (cfg.focal * x) / z;
   const sy = cfg.horizonY + (cfg.focal * cfg.height) / z;
   return { sx, sy, depth: z, visible: true };
 };
 
-const drawSky = (rc: RenderContext, horizonY: number): void => {
+/**
+ * Project a world-space line segment, clipping it against the near plane.
+ * Returns null if entirely behind the camera, otherwise both screen endpoints
+ * with the closer corrected to z=NEAR.
+ */
+const projectSegment = (
+  ax: number,
+  ay: number,
+  bx: number,
+  by: number,
+  cam: CamPose,
+  cfg: CamConfig,
+  screenW: number,
+): { a: Projected; b: Projected } | null => {
+  const cosH = Math.cos(cam.heading);
+  const sinH = Math.sin(cam.heading);
+  const za = (ax - cam.posX) * cosH + (ay - cam.posY) * sinH;
+  const zb = (bx - cam.posX) * cosH + (by - cam.posY) * sinH;
+  let xa = ax;
+  let ya = ay;
+  let xb = bx;
+  let yb = by;
+  if (za <= NEAR_PLANE && zb <= NEAR_PLANE) return null;
+  if (za <= NEAR_PLANE) {
+    const t = (NEAR_PLANE - za) / (zb - za);
+    xa = ax + (bx - ax) * t;
+    ya = ay + (by - ay) * t;
+  } else if (zb <= NEAR_PLANE) {
+    const t = (NEAR_PLANE - zb) / (za - zb);
+    xb = bx + (ax - bx) * t;
+    yb = by + (ay - by) * t;
+  }
+  const a = project(xa, ya, cam, cfg, screenW);
+  const b = project(xb, yb, cam, cfg, screenW);
+  return { a, b };
+};
+
+/** Smoothly fade a value to zero between FOG_START and FOG_END. */
+const fogAlpha = (depth: number): number => {
+  if (depth <= FOG_START) return 1;
+  if (depth >= FOG_END) return 0;
+  return 1 - (depth - FOG_START) / (FOG_END - FOG_START);
+};
+
+const drawSky = (
+  rc: RenderContext,
+  rstate: RenderState,
+  horizonY: number,
+  cam: CamPose,
+  nowMs: number,
+): void => {
   const { ctx, width, height } = rc;
-  // Sky.
+  // Sky gradient.
   const sky = ctx.createLinearGradient(0, 0, 0, horizonY);
-  sky.addColorStop(0, '#150a3a');
+  sky.addColorStop(0, '#0a0524');
+  sky.addColorStop(0.7, '#1f0a44');
   sky.addColorStop(1, '#3a1758');
   ctx.fillStyle = sky;
   ctx.fillRect(0, 0, width, horizonY);
-  // Distant grid lines on sky for depth cue.
-  ctx.strokeStyle = 'rgba(255, 58, 209, 0.18)';
-  ctx.lineWidth = 1;
-  ctx.beginPath();
-  for (let i = 0; i < 6; i++) {
-    const y = (i / 6) * horizonY;
-    ctx.moveTo(0, y);
-    ctx.lineTo(width, y);
+
+  // Stars (parallax: scroll horizontally with camera heading).
+  const stars = rstate.ensureStars(width, horizonY);
+  const headingShift = (cam.heading * width) / Math.PI;
+  for (let i = 0; i < stars.length; i++) {
+    const star = stars[i] as (typeof stars)[number];
+    const sx = ((star.x - headingShift) % width + width) % width;
+    const twinkle = 0.5 + 0.5 * Math.sin(nowMs * 0.003 + star.tw);
+    ctx.fillStyle = `rgba(255, 255, 255, ${0.25 + twinkle * 0.5})`;
+    ctx.beginPath();
+    ctx.arc(sx, star.y, star.r, 0, Math.PI * 2);
+    ctx.fill();
   }
-  ctx.stroke();
-  // Horizon line.
-  ctx.strokeStyle = '#ff3ad1';
-  ctx.lineWidth = 1.5;
+
+  // Distant skyline silhouette (a few jagged pillars near the horizon).
+  ctx.fillStyle = 'rgba(60, 20, 88, 0.85)';
+  let s = 4242;
+  const rng = () => {
+    s = (s * 1103515245 + 12345) & 0x7fffffff;
+    return s / 0x7fffffff;
+  };
   ctx.beginPath();
   ctx.moveTo(0, horizonY);
+  let x = 0;
+  while (x < width) {
+    const w = 18 + rng() * 40;
+    const h = 6 + rng() * 38;
+    ctx.lineTo(x, horizonY - h);
+    ctx.lineTo(x + w, horizonY - h);
+    x += w;
+  }
   ctx.lineTo(width, horizonY);
-  ctx.stroke();
+  ctx.closePath();
+  ctx.fill();
+
+  // Horizon glow line.
+  const horizonGlow = ctx.createLinearGradient(0, horizonY - 6, 0, horizonY + 6);
+  horizonGlow.addColorStop(0, 'rgba(255, 58, 209, 0)');
+  horizonGlow.addColorStop(0.5, 'rgba(255, 58, 209, 0.85)');
+  horizonGlow.addColorStop(1, 'rgba(255, 58, 209, 0)');
+  ctx.fillStyle = horizonGlow;
+  ctx.fillRect(0, horizonY - 6, width, 12);
+
   // Ground gradient below horizon.
   const ground = ctx.createLinearGradient(0, horizonY, 0, height);
-  ground.addColorStop(0, '#0a0420');
-  ground.addColorStop(1, '#06010f');
+  ground.addColorStop(0, '#0c0530');
+  ground.addColorStop(0.4, '#080224');
+  ground.addColorStop(1, '#03000d');
   ctx.fillStyle = ground;
   ctx.fillRect(0, horizonY, width, height - horizonY);
+};
+
+/** Draw an infinite synthwave grid on the ground plane. */
+const drawGrid = (rc: RenderContext, cam: CamPose, cfg: CamConfig): void => {
+  const { ctx, width } = rc;
+  ctx.lineWidth = 1;
+  // World-axis-aligned grid lines around the camera.
+  const px = cam.posX;
+  const py = cam.posY;
+  const baseX = Math.floor(px / GRID_SIZE) * GRID_SIZE;
+  const baseY = Math.floor(py / GRID_SIZE) * GRID_SIZE;
+  const span = 12;
+  // Lines parallel to world Y axis (constant world X).
+  for (let i = -span; i <= span; i++) {
+    const wx = baseX + i * GRID_SIZE;
+    const a = { x: wx, y: py - GRID_SIZE * span };
+    const b = { x: wx, y: py + GRID_SIZE * span };
+    const seg = projectSegment(a.x, a.y, b.x, b.y, cam, cfg, width);
+    if (!seg) continue;
+    const minDepth = Math.min(seg.a.depth, seg.b.depth);
+    const alpha = fogAlpha(minDepth) * 0.6;
+    if (alpha <= 0.01) continue;
+    ctx.strokeStyle = `rgba(58, 255, 225, ${alpha * 0.4})`;
+    ctx.beginPath();
+    ctx.moveTo(seg.a.sx, seg.a.sy);
+    ctx.lineTo(seg.b.sx, seg.b.sy);
+    ctx.stroke();
+  }
+  // Lines parallel to world X axis (constant world Y).
+  for (let i = -span; i <= span; i++) {
+    const wy = baseY + i * GRID_SIZE;
+    const a = { x: px - GRID_SIZE * span, y: wy };
+    const b = { x: px + GRID_SIZE * span, y: wy };
+    const seg = projectSegment(a.x, a.y, b.x, b.y, cam, cfg, width);
+    if (!seg) continue;
+    const minDepth = Math.min(seg.a.depth, seg.b.depth);
+    const alpha = fogAlpha(minDepth) * 0.6;
+    if (alpha <= 0.01) continue;
+    ctx.strokeStyle = `rgba(255, 58, 209, ${alpha * 0.4})`;
+    ctx.beginPath();
+    ctx.moveTo(seg.a.sx, seg.a.sy);
+    ctx.lineTo(seg.b.sx, seg.b.sy);
+    ctx.stroke();
+  }
+};
+
+type EdgePoint = { sx: number; sy: number; depth: number; visible: boolean; wx: number; wy: number };
+
+const projectEdge = (
+  wx: number,
+  wy: number,
+  cam: CamPose,
+  cfg: CamConfig,
+  screenW: number,
+): EdgePoint => {
+  const p = project(wx, wy, cam, cfg, screenW);
+  return { ...p, wx, wy };
 };
 
 const drawTrack = (
@@ -198,54 +357,69 @@ const drawTrack = (
 ): void => {
   const { ctx, width } = rc;
   const N = track.centerline.length;
-  // Iterate from a few segments behind to many ahead.
-  // Project edges of each centerline boundary point.
-  const projL: Projected[] = [];
-  const projR: Projected[] = [];
+
+  // Project both edges of each segment, with near-plane clipping per side.
+  const projL: EdgePoint[] = [];
+  const projR: EdgePoint[] = [];
   const segIndices: number[] = [];
   for (let off = -SEGMENTS_BEHIND; off <= SEGMENTS_AHEAD; off++) {
     const idx = ((centerSegIdx + off) % N + N) % N;
     const pl = edgePoint(track, idx, 0, 1);
     const pr = edgePoint(track, idx, 0, -1);
-    projL.push(project(pl.x, pl.y, cam, cfg, width));
-    projR.push(project(pr.x, pr.y, cam, cfg, width));
+    projL.push(projectEdge(pl.x, pl.y, cam, cfg, width));
+    projR.push(projectEdge(pr.x, pr.y, cam, cfg, width));
     segIndices.push(idx);
   }
 
-  // Build quad list with depth (avg z of the four corners) and draw far-to-near.
+  // Build clipped quads: if any corner is invisible, clip the corresponding
+  // edge segment against the near plane.
   type Quad = {
     depth: number;
-    aL: Projected;
-    bL: Projected;
-    bR: Projected;
-    aR: Projected;
+    aL: { sx: number; sy: number };
+    bL: { sx: number; sy: number };
+    bR: { sx: number; sy: number };
+    aR: { sx: number; sy: number };
     fromIdx: number;
-    toIdx: number;
   };
   const quads: Quad[] = [];
   for (let i = 0; i < projL.length - 1; i++) {
-    const aL = projL[i] as Projected;
-    const bL = projL[i + 1] as Projected;
-    const aR = projR[i] as Projected;
-    const bR = projR[i + 1] as Projected;
-    if (!aL.visible || !bL.visible || !aR.visible || !bR.visible) continue;
-    const depth = (aL.depth + bL.depth + aR.depth + bR.depth) / 4;
+    const aL = projL[i] as EdgePoint;
+    const bL = projL[i + 1] as EdgePoint;
+    const aR = projR[i] as EdgePoint;
+    const bR = projR[i + 1] as EdgePoint;
+    // Skip if all four are behind.
+    if (!aL.visible && !bL.visible && !aR.visible && !bR.visible) continue;
+    // Clip left edge.
+    const segL =
+      aL.visible && bL.visible
+        ? { a: aL, b: bL }
+        : projectSegment(aL.wx, aL.wy, bL.wx, bL.wy, cam, cfg, width);
+    const segR =
+      aR.visible && bR.visible
+        ? { a: aR, b: bR }
+        : projectSegment(aR.wx, aR.wy, bR.wx, bR.wy, cam, cfg, width);
+    if (!segL || !segR) continue;
+    const depth = (segL.a.depth + segL.b.depth + segR.a.depth + segR.b.depth) / 4;
     quads.push({
       depth,
-      aL,
-      bL,
-      bR,
-      aR,
+      aL: segL.a,
+      bL: segL.b,
+      aR: segR.a,
+      bR: segR.b,
       fromIdx: segIndices[i] as number,
-      toIdx: segIndices[i + 1] as number,
     });
   }
-  // Sort far → near so closer covers farther.
+  // Far → near so closer covers farther.
   quads.sort((a, b) => b.depth - a.depth);
 
   for (const q of quads) {
-    // Track surface (purple/blue).
-    ctx.fillStyle = q.depth > 80 ? '#1a0d35' : '#22134a';
+    const fa = fogAlpha(q.depth);
+    if (fa <= 0.01) continue;
+
+    // Track surface: bright enough to read against the synthwave grid.
+    const surfaceShade = (q.fromIdx & 1) === 0 ? '#2c1a5a' : '#36206e';
+    ctx.fillStyle = surfaceShade;
+    ctx.globalAlpha = fa;
     ctx.beginPath();
     ctx.moveTo(q.aL.sx, q.aL.sy);
     ctx.lineTo(q.bL.sx, q.bL.sy);
@@ -253,10 +427,12 @@ const drawTrack = (
     ctx.lineTo(q.aR.sx, q.aR.sy);
     ctx.closePath();
     ctx.fill();
+    ctx.globalAlpha = 1;
 
-    // Edge stripes.
-    const edgeAlpha = Math.max(0.3, 1 - q.depth / 250);
-    ctx.lineWidth = Math.max(1, 3 - q.depth / 80);
+    // Edge stripes (cyan + magenta) with depth-attenuated width and alpha.
+    const edgeAlpha = fa * Math.max(0.35, 1 - q.depth / 220);
+    const edgeWidth = Math.max(1, 3 - q.depth / 80);
+    ctx.lineWidth = edgeWidth;
     ctx.strokeStyle = `rgba(255, 58, 209, ${edgeAlpha})`;
     ctx.beginPath();
     ctx.moveTo(q.aL.sx, q.aL.sy);
@@ -268,14 +444,14 @@ const drawTrack = (
     ctx.lineTo(q.bR.sx, q.bR.sy);
     ctx.stroke();
 
-    // Lane stripe in the middle (solid white dashed).
+    // Centre lane stripe (every other segment).
     if ((q.fromIdx & 1) === 0) {
       const m1x = (q.aL.sx + q.aR.sx) / 2;
       const m1y = (q.aL.sy + q.aR.sy) / 2;
       const m2x = (q.bL.sx + q.bR.sx) / 2;
       const m2y = (q.bL.sy + q.bR.sy) / 2;
-      ctx.strokeStyle = `rgba(255, 255, 255, ${edgeAlpha * 0.5})`;
-      ctx.lineWidth = Math.max(1, 2 - q.depth / 100);
+      ctx.strokeStyle = `rgba(255, 255, 255, ${edgeAlpha * 0.45})`;
+      ctx.lineWidth = Math.max(1, 2.5 - q.depth / 100);
       ctx.beginPath();
       ctx.moveTo(m1x, m1y);
       ctx.lineTo(m2x, m2y);
@@ -283,7 +459,7 @@ const drawTrack = (
     }
   }
 
-  // Draw start/finish line if visible (always after surface so it sits on top).
+  // Start/finish line (drawn after surface so it sits on top).
   const cpIdx = track.checkpoints[0] as number;
   const a = track.centerline[cpIdx] as { x: number; y: number };
   const b = track.centerline[(cpIdx + 1) % N] as { x: number; y: number };
@@ -292,14 +468,23 @@ const drawTrack = (
   const len = Math.hypot(tx, ty) || 1;
   const nx = -ty / len;
   const ny = tx / len;
-  const lA = project(a.x + nx * track.halfWidth, a.y + ny * track.halfWidth, cam, cfg, width);
-  const lB = project(a.x - nx * track.halfWidth, a.y - ny * track.halfWidth, cam, cfg, width);
-  if (lA.visible && lB.visible) {
-    ctx.strokeStyle = '#fff';
-    ctx.lineWidth = Math.max(2, 5 - lA.depth / 50);
+  const sf = projectSegment(
+    a.x + nx * track.halfWidth,
+    a.y + ny * track.halfWidth,
+    a.x - nx * track.halfWidth,
+    a.y - ny * track.halfWidth,
+    cam,
+    cfg,
+    width,
+  );
+  if (sf) {
+    const depth = (sf.a.depth + sf.b.depth) / 2;
+    const fa = fogAlpha(depth);
+    ctx.strokeStyle = `rgba(255, 255, 255, ${fa})`;
+    ctx.lineWidth = Math.max(2, 6 - depth / 50);
     ctx.beginPath();
-    ctx.moveTo(lA.sx, lA.sy);
-    ctx.lineTo(lB.sx, lB.sy);
+    ctx.moveTo(sf.a.sx, sf.a.sy);
+    ctx.lineTo(sf.b.sx, sf.b.sy);
     ctx.stroke();
   }
 };
@@ -311,6 +496,7 @@ const drawShip = (
   ship: { x: number; y: number; h: number; flags: number },
   player: PlayerInfoMsg | undefined,
   isMe: boolean,
+  nowMs: number,
 ): void => {
   const { ctx, width } = rc;
   const ko = (ship.flags & FLAG_KO) !== 0;
@@ -321,54 +507,100 @@ const drawShip = (
   const pivot = project(ship.x, ship.y, cam, cfg, width);
   if (!pivot.visible) return;
 
-  // Screen size scales with depth, capped to avoid huge sprites near camera.
-  const baseSize = isMe ? 22 : 18;
+  const fa = fogAlpha(pivot.depth);
+  if (fa <= 0.02) return;
+
+  const baseSize = isMe ? 22 : 17;
   const size = Math.max(2.5, Math.min(baseSize, (cfg.focal * 2.4) / pivot.depth));
-  // Body sprite is drawn with its nose at -Y (canvas up). Camera projection
-  // already aligns the camera's forward with screen up, so we just rotate by
-  // the ship's heading delta from the camera.
   const relHeading = wrapAngle(ship.h - cam.heading);
+
+  // Ground shadow under the ship (an oval).
+  ctx.save();
+  ctx.translate(pivot.sx, pivot.sy + size * 0.15);
+  ctx.fillStyle = `rgba(0, 0, 0, ${0.45 * fa})`;
+  ctx.beginPath();
+  ctx.ellipse(0, size * 0.1, size * 0.9, size * 0.35, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
 
   ctx.save();
   ctx.translate(pivot.sx, pivot.sy);
   ctx.rotate(relHeading);
+  ctx.globalAlpha = fa;
+
   if (sky) {
     ctx.shadowColor = '#3affe1';
-    ctx.shadowBlur = 16;
+    ctx.shadowBlur = 20;
+  } else if (boost && !ko) {
+    ctx.shadowColor = color;
+    ctx.shadowBlur = 12;
   }
-  ctx.fillStyle = ko ? '#444' : color;
+
+  // Body: arrow with a darker rear and a cockpit highlight.
+  ctx.fillStyle = ko ? '#3a3a3a' : color;
   ctx.beginPath();
-  ctx.moveTo(0, -size * 0.9);
-  ctx.lineTo(size * 0.7, size * 0.7);
-  ctx.lineTo(0, size * 0.4);
-  ctx.lineTo(-size * 0.7, size * 0.7);
+  ctx.moveTo(0, -size * 0.95);
+  ctx.lineTo(size * 0.75, size * 0.65);
+  ctx.lineTo(size * 0.32, size * 0.4);
+  ctx.lineTo(0, size * 0.55);
+  ctx.lineTo(-size * 0.32, size * 0.4);
+  ctx.lineTo(-size * 0.75, size * 0.65);
   ctx.closePath();
   ctx.fill();
+
+  // Cockpit highlight (lighter triangle near nose).
+  if (!ko) {
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.55)';
+    ctx.beginPath();
+    ctx.moveTo(0, -size * 0.55);
+    ctx.lineTo(size * 0.18, -size * 0.05);
+    ctx.lineTo(-size * 0.18, -size * 0.05);
+    ctx.closePath();
+    ctx.fill();
+  }
+
+  // Player outline.
   if (isMe && !ko) {
-    ctx.lineWidth = Math.max(1, size * 0.12);
+    ctx.lineWidth = Math.max(1, size * 0.13);
     ctx.strokeStyle = '#fff';
     ctx.shadowColor = '#fff';
-    ctx.shadowBlur = 6;
+    ctx.shadowBlur = 8;
+    ctx.beginPath();
+    ctx.moveTo(0, -size * 0.95);
+    ctx.lineTo(size * 0.75, size * 0.65);
+    ctx.lineTo(0, size * 0.55);
+    ctx.lineTo(-size * 0.75, size * 0.65);
+    ctx.closePath();
     ctx.stroke();
   }
   ctx.shadowBlur = 0;
 
+  // Boost flame (animated).
   if (boost && !ko) {
-    ctx.fillStyle = 'rgba(255, 210, 58, 0.45)';
+    const flick = 0.7 + 0.3 * Math.sin(nowMs * 0.05);
+    ctx.fillStyle = `rgba(255, 210, 58, ${0.5 * fa})`;
     ctx.beginPath();
-    ctx.moveTo(0, size * 0.5);
-    ctx.lineTo(size * 0.4, size * (1.4 + Math.random() * 0.4));
-    ctx.lineTo(-size * 0.4, size * (1.4 + Math.random() * 0.4));
+    ctx.moveTo(-size * 0.35, size * 0.6);
+    ctx.lineTo(size * 0.35, size * 0.6);
+    ctx.lineTo(0, size * (1.4 + flick * 0.5));
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = `rgba(255, 255, 255, ${0.6 * fa})`;
+    ctx.beginPath();
+    ctx.moveTo(-size * 0.18, size * 0.6);
+    ctx.lineTo(size * 0.18, size * 0.6);
+    ctx.lineTo(0, size * (1.0 + flick * 0.3));
     ctx.closePath();
     ctx.fill();
   }
   if (sky) {
-    ctx.strokeStyle = 'rgba(58, 255, 225, 0.6)';
+    ctx.strokeStyle = `rgba(58, 255, 225, ${0.7 * fa})`;
     ctx.lineWidth = 1.5;
     ctx.beginPath();
-    ctx.arc(0, 0, size * 1.2, 0, Math.PI * 2);
+    ctx.arc(0, 0, size * 1.3 + Math.sin(nowMs * 0.01) * 2, 0, Math.PI * 2);
     ctx.stroke();
   }
+  ctx.globalAlpha = 1;
   ctx.restore();
 };
 
@@ -378,14 +610,13 @@ export const renderFrame = (
   rstate: RenderState,
   nowMs: number,
 ): void => {
-  const { ctx, width, height } = rc;
+  const { width, height } = rc;
   const track = findTrack(state.trackId);
   const ships = computeInterpolatedShips(state, nowMs);
   rstate.updateTrails(new Map([...ships.entries()].map(([id, s]) => [id, { x: s.x, y: s.y }])));
 
   const me = state.myId ? ships.get(state.myId) : undefined;
   if (!me) {
-    // Pre-race overview: top-down zoom out.
     drawOverview(rc, track, state, ships);
     return;
   }
@@ -407,22 +638,19 @@ export const renderFrame = (
     heading,
   };
 
-  drawSky(rc, cfg.horizonY);
-  // Find the segment closest to ship for centering the track render window.
+  drawSky(rc, rstate, cfg.horizonY, cam, nowMs);
+  drawGrid(rc, cam, cfg);
   const closest = closestOnTrack(track, { x: me.x, y: me.y });
   drawTrack(rc, track, cam, cfg, closest.segIdx);
 
-  // Sort ships by depth (back to front).
   const projected = [...ships.entries()].map(([id, s]) => {
     const p = project(s.x, s.y, cam, cfg, width);
     return { id, ship: s, depth: p.depth };
   });
   projected.sort((a, b) => b.depth - a.depth);
   for (const { id, ship } of projected) {
-    drawShip(rc, cam, cfg, ship, state.players[id], id === state.myId);
+    drawShip(rc, cam, cfg, ship, state.players[id], id === state.myId, nowMs);
   }
-
-  void ctx;
 };
 
 const drawOverview = (
