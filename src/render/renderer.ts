@@ -301,7 +301,50 @@ export const setupCanvas = (canvas: HTMLCanvasElement): RenderContext | null => 
   return { ctx, width: rect.width, height: rect.height, dpr };
 };
 
-const project = (
+export type WorldPt = { x: number; y: number; z: number };
+
+/**
+ * Sutherland-Hodgman clip a closed polygon against the half-space z >= clipZ.
+ * Vertices on the kept side are preserved; edges that cross the plane gain
+ * a new vertex at the intersection (z = clipZ). Returns the clipped polygon
+ * (which may be empty if the entire input lies behind the plane).
+ */
+export const clipPolygonAgainstZ = (
+  poly: readonly WorldPt[],
+  clipZ: number,
+): WorldPt[] => {
+  const out: WorldPt[] = [];
+  if (poly.length === 0) return out;
+  for (let i = 0; i < poly.length; i++) {
+    const a = poly[i] as WorldPt;
+    const b = poly[(i + 1) % poly.length] as WorldPt;
+    const aIn = a.z >= clipZ;
+    const bIn = b.z >= clipZ;
+    if (aIn) out.push(a);
+    if (aIn !== bIn) {
+      const t = (clipZ - a.z) / (b.z - a.z);
+      out.push({
+        x: a.x + (b.x - a.x) * t,
+        y: a.y + (b.y - a.y) * t,
+        z: clipZ,
+      });
+    }
+  }
+  return out;
+};
+
+/**
+ * Cap the desired "ahead" segment count so the visible window never covers
+ * more than the entire closed track once. Without this, short tracks
+ * (oval = 48, peanut = 56) would wrap, producing self-overlapping geometry.
+ */
+export const segmentWindowAhead = (
+  totalSegments: number,
+  segmentsBehind: number,
+  desiredAhead: number,
+): number => Math.max(0, Math.min(desiredAhead, totalSegments - 1 - segmentsBehind));
+
+export const project = (
   worldX: number,
   worldY: number,
   cam: CamPose,
@@ -500,7 +543,7 @@ const drawTrack = (
   // otherwise build a self-overlapping polygon and the per-segment decorations
   // would draw lines that straddle the near plane on the far side, producing
   // huge off-screen projections.
-  const aheadMax = Math.min(SEGMENTS_AHEAD, N - 1 - SEGMENTS_BEHIND);
+  const aheadMax = segmentWindowAhead(N, SEGMENTS_BEHIND, SEGMENTS_AHEAD);
   const leftPts: EdgeSample[] = [];
   const rightPts: EdgeSample[] = [];
   for (let off = -SEGMENTS_BEHIND; off <= aheadMax; off++) {
@@ -516,37 +559,20 @@ const drawTrack = (
     }
   }
 
-  // Build closed world-space polygon (left forward, right backward), clip it
-  // against the near plane (Sutherland-Hodgman), then project. This is the
-  // only correct way to keep the surface visible right up to the camera —
-  // simply skipping ribs whose corner crosses the near plane would leave a
-  // hole in front of the player.
-  type WorldPt = { x: number; y: number; z: number };
+  // Build closed world-space polygon (left forward, right backward) and clip
+  // it against the near plane. This is the only correct way to keep the
+  // surface visible right up to the camera — simply skipping ribs whose
+  // corner crosses the near plane would leave a hole in front of the player.
+  // We use clipZ slightly above NEAR_PLANE so projected clip intersections
+  // remain marked visible by `project()` (which gates on `z > NEAR_PLANE`).
+  const CLIP_Z = NEAR_PLANE + 0.01;
   const poly: WorldPt[] = [];
   for (const p of leftPts) poly.push({ x: p.x, y: p.y, z: p.z });
   for (let i = rightPts.length - 1; i >= 0; i--) {
     const p = rightPts[i] as EdgeSample;
     poly.push({ x: p.x, y: p.y, z: p.z });
   }
-  // Slight epsilon above NEAR_PLANE so projected clip intersections remain
-  // marked visible by `project()` (which gates on `z > NEAR_PLANE`).
-  const CLIP_Z = NEAR_PLANE + 0.01;
-  const clipped: WorldPt[] = [];
-  for (let i = 0; i < poly.length; i++) {
-    const a = poly[i] as WorldPt;
-    const b = poly[(i + 1) % poly.length] as WorldPt;
-    const aIn = a.z >= CLIP_Z;
-    const bIn = b.z >= CLIP_Z;
-    if (aIn) clipped.push(a);
-    if (aIn !== bIn) {
-      const t = (CLIP_Z - a.z) / (b.z - a.z);
-      clipped.push({
-        x: a.x + (b.x - a.x) * t,
-        y: a.y + (b.y - a.y) * t,
-        z: CLIP_Z,
-      });
-    }
-  }
+  const clipped = clipPolygonAgainstZ(poly, CLIP_Z);
   if (clipped.length < 3) return;
 
   ctx.fillStyle = '#2c1a5a';

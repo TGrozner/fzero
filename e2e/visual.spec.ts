@@ -204,6 +204,89 @@ test('track surface renders as a solid purple region in the foreground', async (
   ).toBeGreaterThanOrEqual(1);
 });
 
+test('track surface stays visible directly under the player while accelerating', async ({
+  page,
+}) => {
+  // Regression: drawTrack used to skip ribs that straddled the near plane,
+  // leaving a hole between the camera and the closest fully-visible rib.
+  // The player ship sits ~70-80% down the screen — those pixels MUST be the
+  // dark purple track surface (#2c1a5a) every frame while moving forward.
+  await enterRace(page, 'surface-under-player');
+  await page.waitForTimeout(5500);
+
+  const isTrackPurple = (px: RGBA): boolean =>
+    px.r >= 20 && px.r <= 110 && px.g >= 5 && px.g <= 70 && px.b >= 55 && px.b <= 150;
+
+  // Sample under the player at a row of points across the bottom of the
+  // screen, before, during, and after a forward burst.
+  const sampleUnderPlayer = async (): Promise<number> => {
+    const xs = [0.4, 0.45, 0.5, 0.55, 0.6];
+    const ys = [0.7, 0.78, 0.86];
+    let hits = 0;
+    for (const x of xs) {
+      for (const y of ys) {
+        const px = await samplePixel(page, x, y);
+        if (isTrackPurple(px)) hits++;
+      }
+    }
+    return hits;
+  };
+
+  const beforeHits = await sampleUnderPlayer();
+  expect(beforeHits, 'expected track pixels under the player at race start').toBeGreaterThanOrEqual(
+    6,
+  );
+
+  await page.keyboard.down('KeyW');
+  await page.waitForTimeout(400);
+  const midHits = await sampleUnderPlayer();
+  await page.waitForTimeout(400);
+  const afterHits = await sampleUnderPlayer();
+  await page.keyboard.up('KeyW');
+
+  expect(midHits, 'track must stay under the player mid-acceleration').toBeGreaterThanOrEqual(6);
+  expect(afterHits, 'track must stay under the player after sustained acceleration').toBeGreaterThanOrEqual(
+    6,
+  );
+});
+
+test('spin attack visibly rotates the player ship over its duration', async ({ page }) => {
+  // Regression: triggering Enter only flashed a CSS overlay; the ship itself
+  // didn't rotate. RenderState.triggerLocalSpin now drives a 420ms rotation
+  // — sample the same canvas region at two moments in the spin and assert
+  // the pixels differ (the ship has moved/rotated).
+  await enterRace(page, 'spin');
+  await page.waitForTimeout(5500);
+
+  const sampleBlock = async (): Promise<RGBA[]> => {
+    const out: RGBA[] = [];
+    for (const dx of [-0.02, -0.01, 0, 0.01, 0.02]) {
+      for (const dy of [-0.02, -0.01, 0, 0.01, 0.02]) {
+        out.push(await samplePixel(page, 0.5 + dx, 0.78 + dy));
+      }
+    }
+    return out;
+  };
+
+  // Trigger the spin and let one frame settle.
+  await page.keyboard.press('Enter');
+  await page.waitForTimeout(80);
+  const earlyFrame = await sampleBlock();
+
+  // Wait for ~50% of the spin (~210ms after press → ~130ms more).
+  await page.waitForTimeout(150);
+  const midFrame = await sampleBlock();
+
+  const differing = earlyFrame.filter((a, i) => {
+    const b = midFrame[i] as RGBA;
+    return Math.abs(a.r - b.r) + Math.abs(a.g - b.g) + Math.abs(a.b - b.b) > 12;
+  }).length;
+  expect(
+    differing,
+    `expected pixels around the player to change between early and mid spin (got ${differing})`,
+  ).toBeGreaterThanOrEqual(2);
+});
+
 test('60fps target: at least 200 frames in 5 seconds of racing', async ({ page }) => {
   await enterRace(page, 'fps');
   await page.waitForTimeout(4000);
