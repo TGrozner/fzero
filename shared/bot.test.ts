@@ -1,5 +1,12 @@
 import { describe, it, expect } from 'vitest';
-import { botInput, profileFromSeed, profileForId, botName, botColor } from './bot.ts';
+import {
+  type ActivePickup,
+  botInput,
+  profileFromSeed,
+  profileForId,
+  botName,
+  botColor,
+} from './bot.ts';
 import { createVehicle } from './physics.ts';
 import { buildOvalTrack, buildTrack } from './track.ts';
 import { v2 } from './vec2.ts';
@@ -65,6 +72,79 @@ describe('botInput', () => {
     const v = { ...createVehicle('b', track.startPosition, 0), koMeter: 0.5 };
     const r = botInput(v, [], track, profileFromSeed(0), 0);
     expect(r.skyway).toBe(false);
+  });
+
+  it('biases steer toward heal pad when low HP', () => {
+    // Anchor the bot at the start position with the track-tangent heading
+    // so the underlying steering is near zero — any pickup bias becomes
+    // observable instead of getting clamped at ±1.
+    const heading = Math.atan2(track.startHeading.y, track.startHeading.x);
+    const v = {
+      ...createVehicle('b', track.startPosition, heading),
+      vel: { x: Math.cos(heading) * 50, y: Math.sin(heading) * 50 },
+      power: 0.3,
+    };
+    // Right of heading vector = perp(fwd). Place the heal pad ~10 units
+    // ahead and 6 units to the right.
+    const fwdX = Math.cos(heading);
+    const fwdY = Math.sin(heading);
+    const rightX = -Math.sin(heading);
+    const rightY = Math.cos(heading);
+    const padPos = v2(
+      track.startPosition.x + fwdX * 10 + rightX * 6,
+      track.startPosition.y + fwdY * 10 + rightY * 6,
+    );
+    const heal: ActivePickup = { kind: 'heal', pos: padPos };
+    const profile = { ...profileFromSeed(99), skill: 1, aggression: 0 };
+    const r0 = botInput(v, [], track, profile, 0);
+    const rH = botInput(v, [], track, profile, 0, [heal]);
+    expect(rH.steer).not.toBe(r0.steer);
+    // Heal pad on the right → bot should steer more to the right (positive).
+    expect(rH.steer).toBeGreaterThan(r0.steer);
+  });
+
+  it('biases steer AWAY from a mine on the path', () => {
+    const heading = Math.atan2(track.startHeading.y, track.startHeading.x);
+    const v = {
+      ...createVehicle('b', track.startPosition, heading),
+      vel: { x: Math.cos(heading) * 50, y: Math.sin(heading) * 50 },
+      power: 1,
+    };
+    const fwdX = Math.cos(heading);
+    const fwdY = Math.sin(heading);
+    const rightX = -Math.sin(heading);
+    const rightY = Math.cos(heading);
+    const minePos = v2(
+      track.startPosition.x + fwdX * 10 + rightX * 6,
+      track.startPosition.y + fwdY * 10 + rightY * 6,
+    );
+    const mine: ActivePickup = { kind: 'mine', pos: minePos };
+    const profile = { ...profileFromSeed(7), skill: 1, aggression: 0 };
+    const r0 = botInput(v, [], track, profile, 0);
+    const rM = botInput(v, [], track, profile, 0, [mine]);
+    expect(rM.steer).toBeLessThan(r0.steer);
+  });
+
+  it('ignores pickups behind the bot', () => {
+    const heading = Math.atan2(track.startHeading.y, track.startHeading.x);
+    const v = {
+      ...createVehicle('b', track.startPosition, heading),
+      vel: { x: Math.cos(heading) * 50, y: Math.sin(heading) * 50 },
+      power: 0.3,
+    };
+    const fwdX = Math.cos(heading);
+    const fwdY = Math.sin(heading);
+    const rightX = -Math.sin(heading);
+    const rightY = Math.cos(heading);
+    const behindPos = v2(
+      track.startPosition.x - fwdX * 10 + rightX * 5,
+      track.startPosition.y - fwdY * 10 + rightY * 5,
+    );
+    const behind: ActivePickup = { kind: 'heal', pos: behindPos };
+    const profile = { ...profileFromSeed(2), skill: 1, aggression: 0 };
+    const r0 = botInput(v, [], track, profile, 0);
+    const rB = botInput(v, [], track, profile, 0, [behind]);
+    expect(rB.steer).toBe(r0.steer);
   });
 });
 

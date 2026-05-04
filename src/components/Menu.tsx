@@ -7,6 +7,8 @@ type Props = {
   color: string;
   trackId: string;
   roomName: string;
+  volume: number;
+  music: boolean;
   onTrackChange: (id: string) => void;
   onStart: () => void;
   dispatch: (a: Action) => void;
@@ -18,6 +20,8 @@ export function Menu({
   color,
   trackId,
   roomName,
+  volume,
+  music,
   onTrackChange,
   onStart,
   dispatch,
@@ -94,6 +98,43 @@ export function Menu({
           }
           placeholder="Leave blank for global lobby"
         />
+      </div>
+      <div className="row" style={{ flexDirection: 'column', alignItems: 'stretch', gap: 4 }}>
+        <label htmlFor="volume">
+          Volume <span style={{ color: 'var(--text)' }}>{Math.round(volume * 100)}%</span>
+        </label>
+        <input
+          id="volume"
+          data-testid="volume-input"
+          type="range"
+          min={0}
+          max={100}
+          value={Math.round(volume * 100)}
+          onChange={(e) =>
+            dispatch({ type: 'SET_VOLUME', volume: Number(e.target.value) / 100 })
+          }
+        />
+        <label
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 8,
+            cursor: 'pointer',
+            margin: 0,
+            textTransform: 'none',
+            letterSpacing: 0,
+            fontSize: 13,
+            color: 'var(--text)',
+          }}
+        >
+          <input
+            data-testid="music-input"
+            type="checkbox"
+            checked={music}
+            onChange={(e) => dispatch({ type: 'SET_MUSIC', music: e.target.checked })}
+          />
+          Music
+        </label>
       </div>
       <button
         data-testid="race-button"

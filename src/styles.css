@@ -289,6 +289,51 @@ canvas {
   to   { opacity: 0; transform: scale(1.4); }
 }
 
+/* Lap fanfare: big neon banner that crosses the screen briefly on lap. */
+.fx-lap {
+  position: absolute;
+  top: 38%;
+  left: 0;
+  right: 0;
+  text-align: center;
+  font-size: 64px;
+  font-weight: 800;
+  letter-spacing: 0.18em;
+  color: var(--accent-2);
+  text-shadow: 0 0 14px var(--accent-2), 0 0 28px var(--accent);
+  pointer-events: none;
+  z-index: 42;
+  animation: fx-lap 1.4s ease-out forwards;
+}
+@keyframes fx-lap {
+  0%   { opacity: 0; transform: translateY(20px) scale(0.85); letter-spacing: 0.05em; }
+  20%  { opacity: 1; transform: translateY(0) scale(1.05); letter-spacing: 0.18em; }
+  70%  { opacity: 1; transform: translateY(0) scale(1); }
+  100% { opacity: 0; transform: translateY(-30px) scale(0.95); }
+}
+
+/* Position-change toast (overtake). */
+.fx-position {
+  position: absolute;
+  top: 64px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 26px;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  color: var(--text);
+  text-shadow: 0 0 10px var(--accent-2), 0 0 18px rgba(58, 255, 225, 0.5);
+  pointer-events: none;
+  z-index: 41;
+  animation: fx-position 1.2s ease-out forwards;
+}
+@keyframes fx-position {
+  0%   { opacity: 0; transform: translate(-50%, -10px); }
+  15%  { opacity: 1; transform: translate(-50%, 0); }
+  75%  { opacity: 1; }
+  100% { opacity: 0; transform: translate(-50%, -16px); }
+}
+
 /* Damage flash: red vignette pulse when the local player takes a hit. */
 .fx-damage {
   position: absolute;
@@ -429,6 +474,67 @@ canvas {
   font-variant-numeric: tabular-nums;
   font-size: 18px;
   color: var(--text);
+}
+
+.hud-top .speed {
+  font-variant-numeric: tabular-nums;
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--accent-2);
+  text-shadow: 0 0 6px rgba(58, 255, 225, 0.4);
+}
+.hud-top .speed-unit {
+  font-size: 10px;
+  letter-spacing: 0.18em;
+  color: var(--muted);
+  margin-left: 2px;
+}
+
+.cooldowns {
+  display: flex;
+  gap: 6px;
+  margin-top: 4px;
+}
+.cd {
+  position: relative;
+  flex: 1;
+  height: 22px;
+  background: rgba(0, 0, 0, 0.55);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 4px;
+  overflow: hidden;
+  font-variant-numeric: tabular-nums;
+  transition: border-color 0.1s ease, box-shadow 0.1s ease;
+}
+.cd.cd-ready {
+  border-color: rgba(255, 255, 255, 0.55);
+  box-shadow: 0 0 8px rgba(255, 255, 255, 0.4);
+}
+.cd-fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  height: 100%;
+  opacity: 0.55;
+  transition: width 0.05s linear;
+}
+.cd-label {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0 6px;
+  font-size: 10px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--text);
+  height: 100%;
+  pointer-events: none;
+}
+.cd-key {
+  color: var(--muted);
+  font-weight: 600;
+  letter-spacing: 0.1em;
 }
 
 .racers-left {

@@ -25,6 +25,10 @@ export type ShipSnapshot = {
   readonly a: number;
   /** Flags bitmask: 1=skyway, 2=freeBoost, 4=ko, 8=finished. */
   readonly f: number;
+  /** Spin-attack cooldown remaining (s). 0 = ready. */
+  readonly sc: number;
+  /** Side-attack cooldown remaining (s). 0 = ready. */
+  readonly dc: number;
 };
 
 export const FLAG_SKYWAY = 1 << 0;
@@ -94,6 +98,21 @@ export type ServerMessage =
     }
   | { type: 'phase'; phase: RoomPhase; countdown?: number; startsIn?: number }
   | { type: 'ko'; id: string; by: string | null; time: number }
+  | {
+      /**
+       * A non-lethal hit (spin, side, or projectile-style impact). Used to
+       * drive client-side feedback (particles, screen flash) at the world
+       * position of the victim — independent of the per-snapshot ship
+       * positions, which would smooth the impact away.
+       */
+      type: 'hit';
+      victim: string;
+      attacker: string | null;
+      kind: 'spin' | 'side-left' | 'side-right' | 'wall' | 'collision';
+      x: number;
+      y: number;
+      time: number;
+    }
   | { type: 'pickup'; idx: number; kind: 'boost' | 'heal' | 'mine'; vehicleId: string; time: number }
   | {
       type: 'results';

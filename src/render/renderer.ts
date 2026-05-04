@@ -25,7 +25,7 @@ import type { ShipSnapshot } from '../../shared/protocol.ts';
 import { FLAG_FREE_BOOST, FLAG_KO, FLAG_SKYWAY } from '../../shared/protocol.ts';
 import type { Track } from '../../shared/track.ts';
 import { closestOnTrack, edgePoint } from '../../shared/track.ts';
-import { type ClientState, type PickupEvent } from '../state.ts';
+import { type ClientState, type PickupEvent, type HitEvent } from '../state.ts';
 import { findTrack } from '../../shared/track.ts';
 import { type PlayerInfoMsg } from '../../shared/protocol.ts';
 import { lerpAngle, wrapAngle } from '../../shared/vec2.ts';
@@ -183,6 +183,14 @@ export class RenderState {
   shouldConsumePickupEvent(ev: PickupEvent): boolean {
     if (ev.at <= this.lastPickupBurstAt) return false;
     this.lastPickupBurstAt = ev.at;
+    return true;
+  }
+
+  /** Highest `at` of hit events already consumed for impact bursts. */
+  private lastHitBurstAt = 0;
+  shouldConsumeHitEvent(ev: HitEvent): boolean {
+    if (ev.at <= this.lastHitBurstAt) return false;
+    this.lastHitBurstAt = ev.at;
     return true;
   }
 
@@ -402,6 +410,7 @@ export class RenderState {
     this.particles.length = 0;
     this.lastFrameMs = null;
     this.lastPickupBurstAt = 0;
+    this.lastHitBurstAt = 0;
   }
 }
 
@@ -1056,6 +1065,19 @@ export const renderFrame = (
     const kind: 'pickup-boost' | 'pickup-heal' | 'pickup-mine' =
       ev.kind === 'boost' ? 'pickup-boost' : ev.kind === 'heal' ? 'pickup-heal' : 'pickup-mine';
     rstate.spawnImpactBurst(p.x, p.y, kind, 12);
+  }
+
+  // Spawn server-authoritative hit-event impact bursts at the victim's
+  // world position. Filtered to spin / side hits (others not emitted yet).
+  for (const ev of state.hitEvents) {
+    if (!rstate.shouldConsumeHitEvent(ev)) continue;
+    if (ev.kind === 'spin') {
+      rstate.spawnImpactBurst(ev.x, ev.y, 'spin', 8);
+    } else if (ev.kind === 'side-left') {
+      rstate.spawnImpactBurst(ev.x, ev.y, 'side-left', 6);
+    } else if (ev.kind === 'side-right') {
+      rstate.spawnImpactBurst(ev.x, ev.y, 'side-right', 6);
+    }
   }
 
   // Update ship memories once + spawn boost particles for boosting ships.

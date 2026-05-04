@@ -25,7 +25,7 @@ describe('encode/decode round-trip', () => {
       tick: 1,
       time: 0.5,
       ships: [
-        { id: 'a', x: 1, y: 2, h: 0.1, vx: 3, vy: 4, p: 1, k: 0, l: 0, a: 0, f: 0 },
+        { id: 'a', x: 1, y: 2, h: 0.1, vx: 3, vy: 4, p: 1, k: 0, l: 0, a: 0, f: 0, sc: 0, dc: 0 },
       ],
       racersLeft: 99,
       pk: 0,
@@ -91,6 +91,6 @@ describe('flag constants are distinct', () => {
 
 describe('snapshotPos', () => {
   it('extracts x/y as a Vec2', () => {
-    expect(snapshotPos({ id: 'a', x: 3, y: 4, h: 0, vx: 0, vy: 0, p: 1, k: 0, l: 0, a: 0, f: 0 })).toEqual({ x: 3, y: 4 });
+    expect(snapshotPos({ id: 'a', x: 3, y: 4, h: 0, vx: 0, vy: 0, p: 1, k: 0, l: 0, a: 0, f: 0, sc: 0, dc: 0 })).toEqual({ x: 3, y: 4 });
   });
 });

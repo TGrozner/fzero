@@ -1,4 +1,5 @@
 import {
+  type Vec2,
   sub,
   length,
   dot,
@@ -11,6 +12,12 @@ import {
 import { closestOnTrack, lookaheadPoint, type Track } from './track.ts';
 import { type Vehicle, type VehicleInput, NEUTRAL_INPUT } from './physics.ts';
 import { hashString, createRng } from './rng.ts';
+import type { PickupKind } from './pickups.ts';
+
+export type ActivePickup = {
+  readonly kind: PickupKind;
+  readonly pos: Vec2;
+};
 
 export type BotProfile = {
   /** 0..1 — how often this bot triggers attacks. */
@@ -42,6 +49,7 @@ export const botInput = (
   track: Track,
   profile: BotProfile,
   raceTime: number,
+  pickups: readonly ActivePickup[] = [],
 ): VehicleInput => {
   if (bot.ko || bot.finished) return NEUTRAL_INPUT;
 
@@ -69,8 +77,42 @@ export const botInput = (
   let throttle = 1;
   if (Math.abs(angleDiff) > Math.PI / 2) throttle = 0.3;
 
-  // Avoid the nearest other vehicle directly in front.
   const fwd = fromAngle(bot.heading);
+  const right = perp(fwd);
+
+  // Pickup awareness: low HP → bias toward heal; high HP → bias toward
+  // boost. Always nudge away from mines that lie on our path.
+  let pickupSteer = 0;
+  let mineSteer = 0;
+  // Stronger heal pull when we're hurting; weaker boost pull when we're
+  // already near full power so we don't deviate from the racing line.
+  const wantHeal = bot.power < 0.55;
+  const wantBoostPad = bot.power > 0.4;
+  for (const pu of pickups) {
+    const rel = sub(pu.pos, bot.pos);
+    const dist = length(rel);
+    if (dist > 36) continue;
+    const ahead = dot(rel, fwd);
+    if (ahead <= 0) continue; // already passed
+    const lateral = dot(rel, right); // +ve = right of heading
+    const lateralAbs = Math.abs(lateral);
+    if (lateralAbs > 18) continue; // not really on our path
+    // Positive steer rotates CCW, which in our convention is "right of
+    // heading" (perp((1,0)) = (0,1)). So +sign(lateral) = TOWARD the pad.
+    const towardPad = Math.sign(lateral);
+    const proximity = 1 - dist / 36;
+    if (pu.kind === 'mine') {
+      // Steer AWAY from mines.
+      mineSteer += -towardPad * proximity * 0.9 * (0.6 + profile.skill * 0.5);
+    } else if (pu.kind === 'heal' && wantHeal) {
+      const need = (1 - bot.power) * 1.4; // 0..~1.5 weight
+      pickupSteer += towardPad * proximity * need * (0.5 + profile.skill * 0.4);
+    } else if (pu.kind === 'boost' && wantBoostPad) {
+      pickupSteer += towardPad * proximity * 0.45 * (0.4 + profile.skill * 0.5);
+    }
+  }
+
+  // Avoid the nearest other vehicle directly in front.
   let avoidSteer = 0;
   for (const o of others) {
     if (o.id === bot.id || o.ko) continue;
@@ -79,12 +121,10 @@ export const botInput = (
     if (dist > 25) continue;
     const forwardDot = dot(rel, fwd);
     if (forwardDot <= 0) continue; // behind us
-    // Compute side of obstacle: positive = on left, negative = on right.
-    const right = perp(fwd);
     const lateralDot = dot(rel, right);
     avoidSteer += -Math.sign(lateralDot) * (1 - dist / 25) * 0.6;
   }
-  steer = clamp(steer + avoidSteer, -1, 1);
+  steer = clamp(steer + avoidSteer + pickupSteer + mineSteer, -1, 1);
 
   // Boost when conditions are favorable: heading aligned + plenty of power.
   const aligned = Math.abs(angleDiff) < 0.25;
@@ -113,7 +153,6 @@ export const botInput = (
   let sideLeft = false;
   let sideRight = false;
   if (bot.sideCd <= 0 && profile.aggression > 0.4) {
-    const right = perp(fwd);
     for (const o of others) {
       if (o.id === bot.id || o.ko || o.skywayUntil > raceTime) continue;
       const rel = sub(o.pos, bot.pos);

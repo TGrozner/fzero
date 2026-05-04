@@ -77,13 +77,79 @@ describe('reducer', () => {
         tick: 1,
         time: 1.5,
         racersLeft: 50,
-        ships: [{ id: 'p1', x: 0, y: 0, h: 0, vx: 0, vy: 0, p: 1, k: 0, l: 0, a: 0, f: 0 }],
+        ships: [{ id: 'p1', x: 0, y: 0, h: 0, vx: 0, vy: 0, p: 1, k: 0, l: 0, a: 0, f: 0, sc: 0, dc: 0 }],
         pk: 0xff,
       },
     });
     expect(s.snapshots.length).toBe(1);
     expect(s.racersLeft).toBe(50);
     expect(s.snapshots[0]?.pk).toBe(0xff);
+  });
+
+  it('SET_VOLUME clamps to 0..1', () => {
+    expect(reducer(baseState(), { type: 'SET_VOLUME', volume: 2 }).volume).toBe(1);
+    expect(reducer(baseState(), { type: 'SET_VOLUME', volume: -3 }).volume).toBe(0);
+    expect(reducer(baseState(), { type: 'SET_VOLUME', volume: 0.42 }).volume).toBeCloseTo(0.42);
+  });
+
+  it('SET_MUSIC toggles the music flag', () => {
+    expect(reducer(baseState(), { type: 'SET_MUSIC', music: false }).music).toBe(false);
+  });
+
+  it('SET_ROOM updates the room name', () => {
+    const s = reducer(baseState(), { type: 'SET_ROOM', roomName: 'alpha' });
+    expect(s.roomName).toBe('alpha');
+  });
+
+  it('SERVER_MESSAGE hit queues a transient hit event', () => {
+    const s = reducer(baseState(), {
+      type: 'SERVER_MESSAGE',
+      receivedAt: 200,
+      message: {
+        type: 'hit',
+        victim: 'p2',
+        attacker: 'p1',
+        kind: 'spin',
+        x: 12,
+        y: 24,
+        time: 1.5,
+      },
+    });
+    expect(s.hitEvents).toHaveLength(1);
+    expect(s.hitEvents[0]?.kind).toBe('spin');
+    expect(s.hitEvents[0]?.x).toBe(12);
+  });
+
+  it('hitEvents are aged out by snapshot updates', () => {
+    let s = reducer(baseState(), {
+      type: 'SERVER_MESSAGE',
+      receivedAt: 100,
+      message: {
+        type: 'hit',
+        victim: 'p2',
+        attacker: 'p1',
+        kind: 'spin',
+        x: 0,
+        y: 0,
+        time: 1,
+      },
+    });
+    // The reducer's hit-event aging happens on subsequent hits; explicitly
+    // verify the cutoff filter by issuing a second hit far in the future.
+    s = reducer(s, {
+      type: 'SERVER_MESSAGE',
+      receivedAt: 100 + 2000, // 2s later — well beyond the 800ms cutoff
+      message: {
+        type: 'hit',
+        victim: 'p3',
+        attacker: 'p1',
+        kind: 'side-left',
+        x: 1,
+        y: 2,
+        time: 3,
+      },
+    });
+    expect(s.hitEvents.map((e) => e.victim)).toEqual(['p3']);
   });
 
   it('SERVER_MESSAGE pickup queues a transient event', () => {
@@ -175,8 +241,8 @@ describe('selectors', () => {
         racersLeft: 99,
         pk: 0,
         ships: [
-          { id: 'p1', x: 0, y: 0, h: 0, vx: 0, vy: 0, p: 1, k: 0, l: 0, a: 50, f: 0 },
-          { id: 'p2', x: 0, y: 0, h: 0, vx: 0, vy: 0, p: 1, k: 0, l: 0, a: 200, f: 0 },
+          { id: 'p1', x: 0, y: 0, h: 0, vx: 0, vy: 0, p: 1, k: 0, l: 0, a: 50, f: 0, sc: 0, dc: 0 },
+          { id: 'p2', x: 0, y: 0, h: 0, vx: 0, vy: 0, p: 1, k: 0, l: 0, a: 200, f: 0, sc: 0, dc: 0 },
         ],
       },
     ],
@@ -214,8 +280,8 @@ describe('selectors', () => {
           pk: 0,
           ships: [
             // p2 has higher arc but is KO
-            { id: 'p2', x: 0, y: 0, h: 0, vx: 0, vy: 0, p: 0, k: 0, l: 0, a: 200, f: 4 },
-            { id: 'p3', x: 0, y: 0, h: 0, vx: 0, vy: 0, p: 1, k: 0, l: 0, a: 100, f: 0 },
+            { id: 'p2', x: 0, y: 0, h: 0, vx: 0, vy: 0, p: 0, k: 0, l: 0, a: 200, f: 4, sc: 0, dc: 0 },
+            { id: 'p3', x: 0, y: 0, h: 0, vx: 0, vy: 0, p: 1, k: 0, l: 0, a: 100, f: 0, sc: 0, dc: 0 },
           ],
         },
       ],

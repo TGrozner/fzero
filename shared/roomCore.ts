@@ -30,7 +30,13 @@ import {
   pickupWorldPos,
 } from './pickups.ts';
 import type { Vec2 } from './vec2.ts';
-import { botColor, botInput, botName, profileForId } from './bot.ts';
+import {
+  type ActivePickup,
+  botColor,
+  botInput,
+  botName,
+  profileForId,
+} from './bot.ts';
 import {
   type ServerMessage,
   type ShipSnapshot,
@@ -314,14 +320,29 @@ export class RoomCore {
         events.push({ type: 'phase', phase: 'RACING' });
       }
     } else if (this.phase === 'RACING') {
-      // Compute bot inputs from current state.
+      // Compute bot inputs from current state. Also surface the active
+      // pickup list so bots can chase heal/boost and dodge mines.
       const allVehicles = [...this.vehicles.values()];
+      const activePickups: ActivePickup[] = [];
+      for (let i = 0; i < this.pickupLayout.length; i++) {
+        if ((this.pickupRespawnAt[i] ?? 0) > this.raceTime) continue;
+        const spec = this.pickupLayout[i];
+        const pos = this.pickupPositions[i];
+        if (spec && pos) activePickups.push({ kind: spec.kind, pos });
+      }
       for (const entry of this.players.values()) {
         if (!entry.bot) continue;
         const v = this.vehicles.get(entry.id);
         if (!v) continue;
         const others = allVehicles.filter((x) => x.id !== entry.id);
-        const input = botInput(v, others, this.track, profileForId(entry.id), this.raceTime);
+        const input = botInput(
+          v,
+          others,
+          this.track,
+          profileForId(entry.id),
+          this.raceTime,
+          activePickups,
+        );
         this.inputs.set(entry.id, input);
       }
       this.raceTime += dt;
@@ -364,6 +385,18 @@ export class RoomCore {
       // KO events.
       for (const ko of result.kos) {
         events.push({ type: 'ko', id: ko.id, by: ko.by, time: this.raceTime });
+      }
+      // Non-lethal hit events (spin / side) — surfaced for client FX.
+      for (const h of result.hits) {
+        events.push({
+          type: 'hit',
+          victim: h.victimId,
+          attacker: h.attackerId,
+          kind: h.kind,
+          x: h.x,
+          y: h.y,
+          time: this.raceTime,
+        });
       }
       // Auto-abandon: free DO budget when no human is interacting.
       const humansLeft = [...this.players.values()].filter((p) => !p.bot).length;
@@ -464,6 +497,8 @@ export class RoomCore {
         l: v.lap,
         a: v.arcLength,
         f,
+        sc: Math.max(0, v.spinCd),
+        dc: Math.max(0, v.sideCd),
       });
     }
     return out;

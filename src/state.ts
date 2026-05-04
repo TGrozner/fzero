@@ -29,6 +29,16 @@ export type KoLogEntry = {
   readonly y: number | null;
 };
 
+export type HitEvent = {
+  readonly victim: string;
+  readonly attacker: string | null;
+  readonly kind: 'spin' | 'side-left' | 'side-right' | 'wall' | 'collision';
+  readonly x: number;
+  readonly y: number;
+  /** receivedAt (ms) — used as a unique key for renderer dedup. */
+  readonly at: number;
+};
+
 export type Standing = {
   id: string;
   position: number;
@@ -47,6 +57,10 @@ export type ClientState = {
   trackId: string;
   /** Optional room name (matchmaking key). Empty = lobby/default. */
   roomName: string;
+  /** Master audio volume 0..1. */
+  volume: number;
+  /** Whether the synthwave background pad plays. */
+  music: boolean;
   phase: RoomPhase;
   countdown: number;
   startsIn: number;
@@ -67,6 +81,8 @@ export type ClientState = {
   pickupEvents: readonly PickupEvent[];
   /** Last N KOs in chronological order — surfaced on the results screen. */
   koLog: readonly KoLogEntry[];
+  /** Recent hit events from the server — drives world-space impact FX. */
+  hitEvents: readonly HitEvent[];
 };
 
 export const buildInitialClientState = (): ClientState => ({
@@ -77,6 +93,8 @@ export const buildInitialClientState = (): ClientState => ({
   myId: null,
   trackId: 'mute-avenue',
   roomName: '',
+  volume: 0.6,
+  music: true,
   phase: 'WAITING',
   countdown: 0,
   startsIn: -1,
@@ -90,6 +108,7 @@ export const buildInitialClientState = (): ClientState => ({
   myKos: [],
   pickupEvents: [],
   koLog: [],
+  hitEvents: [],
 });
 
 export type Action =
@@ -97,6 +116,8 @@ export type Action =
   | { type: 'SET_COLOR'; color: string }
   | { type: 'SET_TRACK'; trackId: string }
   | { type: 'SET_ROOM'; roomName: string }
+  | { type: 'SET_VOLUME'; volume: number }
+  | { type: 'SET_MUSIC'; music: boolean }
   | { type: 'CONNECTING' }
   | { type: 'CONNECTED' }
   | { type: 'DISCONNECTED' }
@@ -118,6 +139,10 @@ export const reducer = (state: ClientState, action: Action): ClientState => {
       return { ...state, trackId: action.trackId };
     case 'SET_ROOM':
       return { ...state, roomName: action.roomName };
+    case 'SET_VOLUME':
+      return { ...state, volume: Math.max(0, Math.min(1, action.volume)) };
+    case 'SET_MUSIC':
+      return { ...state, music: action.music };
     case 'CONNECTING':
       return { ...state, status: 'connecting', error: null };
     case 'CONNECTED':
@@ -131,6 +156,7 @@ export const reducer = (state: ClientState, action: Action): ClientState => {
         snapshots: [],
         paused: false,
         koLog: [],
+        hitEvents: [],
       };
     case 'CONNECTION_ERROR':
       return { ...state, status: 'error', error: action.error, view: 'menu' };
@@ -210,6 +236,24 @@ const applyServer = (
         pickupEvents: [
           ...fresh,
           { idx: msg.idx, kind: msg.kind, vehicleId: msg.vehicleId, at: now },
+        ],
+      };
+    }
+    case 'hit': {
+      const cutoff = now - 800;
+      const fresh = state.hitEvents.filter((e) => e.at > cutoff);
+      return {
+        ...state,
+        hitEvents: [
+          ...fresh,
+          {
+            victim: msg.victim,
+            attacker: msg.attacker,
+            kind: msg.kind,
+            x: msg.x,
+            y: msg.y,
+            at: now,
+          },
         ],
       };
     }

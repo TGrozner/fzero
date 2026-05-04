@@ -13,6 +13,8 @@ describe('Menu', () => {
         color="#3aa0ff"
         trackId="mute-avenue"
         roomName=""
+        volume={0.6}
+        music={true}
         onTrackChange={() => {}}
         onStart={onStart}
         dispatch={dispatch}
@@ -31,6 +33,8 @@ describe('Menu', () => {
         color="#3aa0ff"
         trackId="mute-avenue"
         roomName=""
+        volume={0.6}
+        music={true}
         onTrackChange={() => {}}
         onStart={() => {}}
         dispatch={dispatch}
@@ -49,6 +53,8 @@ describe('Menu', () => {
         color="#3aa0ff"
         trackId="mute-avenue"
         roomName=""
+        volume={0.6}
+        music={true}
         onTrackChange={() => {}}
         onStart={() => {}}
         dispatch={dispatch}
@@ -68,6 +74,8 @@ describe('Menu', () => {
         color="#3aa0ff"
         trackId="mute-avenue"
         roomName=""
+        volume={0.6}
+        music={true}
         onTrackChange={() => {}}
         onStart={onStart}
         dispatch={() => {}}

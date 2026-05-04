@@ -6,7 +6,7 @@ import {
   resolveVehicleCollision,
   stepVehicle,
 } from './physics.ts';
-import { applySpinAttack } from './attacks.ts';
+import { applySideAttack, applySpinAttack, type AttackHit } from './attacks.ts';
 import { closestOnTrack, type Track } from './track.ts';
 import {
   KO_METER_PER_CHECKPOINT,
@@ -134,7 +134,7 @@ export const stepRace = (
   config: RaceConfig,
   dt: number,
   raceTime: number,
-): { vehicles: Vehicle[]; kos: KoEvent[] } => {
+): { vehicles: Vehicle[]; kos: KoEvent[]; hits: AttackHit[] } => {
   // During the spawn-protection window, strip all attack flags.
   const protect = raceTime < SPAWN_PROTECTION_S;
   let stepped = vehicles.map((v) => {
@@ -158,6 +158,7 @@ export const stepRace = (
   });
 
   const allKos: KoEvent[] = [];
+  const allHits: AttackHit[] = [];
 
   if (!protect) {
     for (let i = 0; i < stepped.length; i++) {
@@ -167,6 +168,22 @@ export const stepRace = (
       const result = applySpinAttack(attacker, stepped, raceTime);
       stepped = result.others.map((v) => (v.id === attacker.id ? result.attacker : v));
       for (const koId of result.kos) allKos.push({ id: koId, by: attacker.id });
+      allHits.push(...result.hits);
+    }
+    for (let i = 0; i < stepped.length; i++) {
+      const attacker = stepped[i] as Vehicle;
+      const input = inputs.get(attacker.id);
+      if (!input) continue;
+      // Side attacks fired this tick are already reflected in attacker.sideCd
+      // by physics — we detect them by checking the input bit AND that the
+      // cooldown is fresh (>= SIDE_ATTACK_COOLDOWN_S * 0.95). We don't gate
+      // on the input alone because the physics step may have ignored it.
+      if (!input.sideLeft && !input.sideRight) continue;
+      const dir: -1 | 1 = input.sideLeft ? -1 : 1;
+      const result = applySideAttack(attacker, stepped, dir, raceTime);
+      stepped = result.others.map((v) => (v.id === attacker.id ? result.attacker : v));
+      for (const koId of result.kos) allKos.push({ id: koId, by: attacker.id });
+      allHits.push(...result.hits);
     }
   }
 
@@ -202,7 +219,7 @@ export const stepRace = (
     }
   }
 
-  return { vehicles: finalVehicles, kos: allKos };
+  return { vehicles: finalVehicles, kos: allKos, hits: allHits };
 };
 
 export type Standing = {

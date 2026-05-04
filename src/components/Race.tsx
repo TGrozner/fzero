@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
-import { type ClientState, type Action, findMyShip, spectatorTargetId } from '../state.ts';
+import { type ClientState, type Action, findMyShip, spectatorTargetId, myPosition } from '../state.ts';
+import { getMixer } from '../audio/mixer.ts';
 import { useGameLoop } from '../hooks/useGameLoop.ts';
 import { useKeyboard, keyboardToInput } from '../hooks/useKeyboard.ts';
 import { HUD } from './HUD.tsx';
@@ -36,7 +37,17 @@ export function Race({ state, dispatch, socket, onLeave }: Props) {
   const [hitMarkers, setHitMarkers] = useState<readonly { id: number }[]>([]);
   const [hitPops, setHitPops] = useState<readonly { id: number }[]>([]);
   const [damageFlash, setDamageFlash] = useState<number>(0);
+  const [lapFanfare, setLapFanfare] = useState<{ id: number; lap: number } | null>(null);
+  const [positionToast, setPositionToast] = useState<{ id: number; pos: number; dir: 'up' | 'down' } | null>(null);
   const fxIdRef = useRef(0);
+  // SFX bookkeeping refs.
+  const lastCountdownTickRef = useRef<number | null>(null);
+  const lastConsumedKoAtRef = useRef(0);
+  const lastConsumedHitAtRef = useRef(0);
+  const lastConsumedPickupAtRef = useRef(0);
+  const lastLapRef = useRef<number | null>(null);
+  const lastPositionRef = useRef<number | null>(null);
+  const lastFinishedRef = useRef(false);
   const profileEnabled =
     typeof window !== 'undefined' &&
     new URLSearchParams(window.location.search).get('profile') === '1';
@@ -106,9 +117,11 @@ export function Race({ state, dispatch, socket, onLeave }: Props) {
     };
     const onKey = (e: KeyboardEvent) => {
       if (e.repeat) return;
+      const mixer = getMixer();
       if (e.code === 'Enter') {
         setSpinFlash(true);
         renderRef.current.triggerLocalSpin(performance.now());
+        mixer.play('spin', 0.7);
         if (spinTimer) clearTimeout(spinTimer);
         spinTimer = window.setTimeout(() => setSpinFlash(false), 240);
         const hits = findHits(({ dist }) => dist <= SPIN_ATTACK_RADIUS);
@@ -123,6 +136,7 @@ export function Race({ state, dispatch, socket, onLeave }: Props) {
         const dir: -1 | 1 = e.code === 'KeyQ' ? -1 : 1;
         setSideRing(dir);
         renderRef.current.triggerLocalSide(performance.now(), dir);
+        mixer.play('side', 0.7);
         if (sideTimer) clearTimeout(sideTimer);
         sideTimer = window.setTimeout(() => setSideRing(null), 320);
         // Side attack: enemy must be on the corresponding side perpendicular
@@ -253,6 +267,118 @@ export function Race({ state, dispatch, socket, onLeave }: Props) {
     return () => clearInterval(interval);
   }, [socket]);
 
+  // Background music: ensure it's running while the race screen is up.
+  useEffect(() => {
+    if (state.music) getMixer().ensureMusic();
+  }, [state.music]);
+
+  // Audio + position-toast + lap-fanfare reactive layer. Watches state for
+  // events worth surfacing audibly/visually.
+  useEffect(() => {
+    const mixer = getMixer();
+    // Countdown ticks.
+    if (state.phase === 'COUNTDOWN') {
+      const v = Math.ceil(state.countdown);
+      if (v >= 1 && v <= 3 && lastCountdownTickRef.current !== v) {
+        lastCountdownTickRef.current = v;
+        mixer.play('countdown-tick');
+      }
+    } else if (lastCountdownTickRef.current !== null && state.phase === 'RACING') {
+      // Crossing into RACING from COUNTDOWN -> "GO".
+      mixer.play('countdown-go');
+      lastCountdownTickRef.current = null;
+    }
+    // KO sounds — local KO is a special heavy "ko" SFX.
+    for (const ko of state.koLog) {
+      if (ko.time <= lastConsumedKoAtRef.current) continue;
+      lastConsumedKoAtRef.current = ko.time;
+      if (ko.id === state.myId) {
+        mixer.play('ko', 1.2);
+      } else if (ko.by === state.myId) {
+        mixer.play('ko', 0.85);
+      } else {
+        mixer.play('ko', 0.5);
+      }
+    }
+    // Hit sounds — quieter, high count.
+    for (const ev of state.hitEvents) {
+      if (ev.at <= lastConsumedHitAtRef.current) continue;
+      lastConsumedHitAtRef.current = ev.at;
+      const meIs =
+        ev.victim === state.myId
+          ? 'victim'
+          : ev.attacker === state.myId
+            ? 'attacker'
+            : 'other';
+      const gain = meIs === 'other' ? 0.35 : 0.85;
+      mixer.play('hit', gain);
+    }
+    // Pickup sounds.
+    for (const ev of state.pickupEvents) {
+      if (ev.at <= lastConsumedPickupAtRef.current) continue;
+      lastConsumedPickupAtRef.current = ev.at;
+      const isMine = ev.vehicleId === state.myId;
+      if (!isMine && ev.kind !== 'mine') continue; // only "I picked it up" or "anyone hit a mine" are interesting
+      const gain = isMine ? 1 : 0.5;
+      if (ev.kind === 'boost') mixer.play('pickup-boost', gain);
+      else if (ev.kind === 'heal') mixer.play('pickup-heal', gain);
+      else mixer.play('pickup-mine', gain);
+    }
+    // Lap fanfare + sound when MY lap counter increments.
+    const me = findMyShip(state);
+    if (me) {
+      const prevLap = lastLapRef.current;
+      if (prevLap !== null && me.l > prevLap) {
+        const id = ++fxIdRef.current;
+        if (me.l >= 3) {
+          mixer.play('finish', 1);
+          if (!lastFinishedRef.current) {
+            lastFinishedRef.current = true;
+          }
+        } else {
+          mixer.play('lap', 1);
+          setLapFanfare({ id, lap: me.l + 1 });
+          window.setTimeout(() => {
+            setLapFanfare((cur) => (cur && cur.id === id ? null : cur));
+          }, 1400);
+        }
+      }
+      lastLapRef.current = me.l;
+      // Engine pad reacts to local speed.
+      const speed = Math.hypot(me.vx, me.vy);
+      mixer.setEngineSpeed(Math.min(1, speed / 280));
+    }
+    // Position-change toast (only meaningful while racing, with snapshots).
+    if (state.phase === 'RACING') {
+      const pos = myPosition(state);
+      if (pos !== null) {
+        const prev = lastPositionRef.current;
+        if (prev !== null && pos !== prev) {
+          // Trigger only on improvements (overtakes) — losing position is a
+          // negative cue we leave silent to avoid being annoying.
+          if (pos < prev) {
+            const id = ++fxIdRef.current;
+            mixer.play('overtake', 0.6);
+            setPositionToast({ id, pos, dir: 'up' });
+            window.setTimeout(() => {
+              setPositionToast((cur) => (cur && cur.id === id ? null : cur));
+            }, 1200);
+          }
+        }
+        lastPositionRef.current = pos;
+      }
+    }
+  }, [
+    state.phase,
+    state.countdown,
+    state.koLog,
+    state.hitEvents,
+    state.pickupEvents,
+    state.snapshots,
+    state.myId,
+    state,
+  ]);
+
   const ship = findMyShip(state);
   const myKo = ship ? (ship.f & FLAG_KO) !== 0 : false;
   const showCountdown = state.phase === 'COUNTDOWN';
@@ -322,6 +448,19 @@ export function Race({ state, dispatch, socket, onLeave }: Props) {
           className="fx-damage"
           data-testid="fx-damage"
         />
+      )}
+      {/* Lap completion fanfare overlay. */}
+      {lapFanfare && (
+        <div className="fx-lap" data-testid="fx-lap" key={lapFanfare.id}>
+          LAP {lapFanfare.lap} / 3
+        </div>
+      )}
+      {/* Position-change toast when the local player overtakes. */}
+      {positionToast && (
+        <div className="fx-position" data-testid="fx-position" key={positionToast.id}>
+          P{positionToast.pos}
+          <span style={{ marginLeft: 8, color: 'var(--accent-2)' }}>▲</span>
+        </div>
       )}
       {profileEnabled && (
         <ProfileOverlay

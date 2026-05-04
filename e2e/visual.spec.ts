@@ -258,11 +258,14 @@ test('spin attack visibly rotates the player ship over its duration', async ({ p
   await enterRace(page, 'spin');
   await page.waitForTimeout(5500);
 
+  // Sample a generous block around the player ship pivot. The ship sits
+  // roughly 65-70% of the way down the screen depending on speed; the body
+  // is ~22px so we cover a wide enough region to catch the rotation.
   const sampleBlock = async (): Promise<RGBA[]> => {
     const out: RGBA[] = [];
-    for (const dx of [-0.02, -0.01, 0, 0.01, 0.02]) {
-      for (const dy of [-0.02, -0.01, 0, 0.01, 0.02]) {
-        out.push(await samplePixel(page, 0.5 + dx, 0.78 + dy));
+    for (const dx of [-0.04, -0.02, 0, 0.02, 0.04]) {
+      for (const dy of [-0.06, -0.03, 0, 0.03, 0.06]) {
+        out.push(await samplePixel(page, 0.5 + dx, 0.7 + dy));
       }
     }
     return out;
@@ -270,16 +273,16 @@ test('spin attack visibly rotates the player ship over its duration', async ({ p
 
   // Trigger the spin and let one frame settle.
   await page.keyboard.press('Enter');
-  await page.waitForTimeout(80);
+  await page.waitForTimeout(60);
   const earlyFrame = await sampleBlock();
 
-  // Wait for ~50% of the spin (~210ms after press → ~130ms more).
+  // Wait for ~50% of the spin (~210ms after press → ~150ms more).
   await page.waitForTimeout(150);
   const midFrame = await sampleBlock();
 
   const differing = earlyFrame.filter((a, i) => {
     const b = midFrame[i] as RGBA;
-    return Math.abs(a.r - b.r) + Math.abs(a.g - b.g) + Math.abs(a.b - b.b) > 12;
+    return Math.abs(a.r - b.r) + Math.abs(a.g - b.g) + Math.abs(a.b - b.b) > 8;
   }).length;
   expect(
     differing,

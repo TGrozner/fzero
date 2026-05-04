@@ -50,6 +50,8 @@ const buildShipState = (count: number) => {
       l: 0,
       a: i,
       f: 0,
+      sc: 0,
+      dc: 0,
     })),
   });
   const a = mkSnap(0);
