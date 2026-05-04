@@ -43,7 +43,10 @@ export const useGameSocket = (
   const reconnectAttempts = useRef(0);
   const reconnectTimer = useRef<number | null>(null);
   const enabledRef = useRef(enabled);
-  enabledRef.current = enabled;
+
+  useEffect(() => {
+    enabledRef.current = enabled;
+  }, [enabled]);
 
   useEffect(() => {
     if (!enabled) {

@@ -1,3 +1,26 @@
+/**
+ * Render-loop profiling notes (Canvas2D). Hot paths the in-browser FPS
+ * overlay (`?profile=1`) and `vitest bench` flag:
+ *
+ *   • drawTrack: O(SUBS * (SEGMENTS_AHEAD + SEGMENTS_BEHIND)) per frame plus
+ *     two passes of per-segment decoration. Dominates at 99 ships and is
+ *     mostly fill-rate / `ctx.fill` cost.
+ *   • drawTrails: O(ships * trailLen) project + stroke. `shadowBlur` is
+ *     non-negligible — keep it small (~6).
+ *   • drawShip: per-ship `ctx.save`/`restore` + `transform` is ~60 calls per
+ *     frame. Switching to a single batched transform / instanced WebGL pipe
+ *     would reclaim the per-call overhead.
+ *
+ * WebGL upgrade plan (for future work):
+ *   1. Move ground (track + decorations + grid) to a single textured quad
+ *      with per-pixel perspective in a fragment shader. Eliminates the
+ *      per-rib polygon allocation each frame.
+ *   2. Move ship + trail + particle batches to instanced quads. With ~99
+ *      ships, ~600 particles, ~99*8 trail segments the draw-call count is
+ *      already in the thousands per frame; a single instanced draw collapses
+ *      it to one.
+ *   3. The 2D HUD stays on Canvas2D — no benefit moving it.
+ */
 import type { ShipSnapshot } from '../../shared/protocol.ts';
 import { FLAG_FREE_BOOST, FLAG_KO, FLAG_SKYWAY } from '../../shared/protocol.ts';
 import type { Track } from '../../shared/track.ts';
@@ -289,8 +312,8 @@ export class RenderState {
       'pickup-mine': '#ff4040',
     } as const;
     for (let i = 0; i < count; i++) {
-      let vx = 0;
-      let vy = 0;
+      let vx: number;
+      let vy: number;
       if (kind === 'spin') {
         const a = (i / count) * Math.PI * 2 + Math.random() * 0.4;
         const sp = 30 + Math.random() * 30;
@@ -335,6 +358,10 @@ export class RenderState {
 
   particlesIter(): readonly Particle[] {
     return this.particles;
+  }
+
+  particleCount(): number {
+    return this.particles.length;
   }
 
   /** Returns ms elapsed since last frame; first call returns 16. */

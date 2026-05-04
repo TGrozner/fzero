@@ -1,5 +1,7 @@
 import { bench, describe } from 'vitest';
-import { clipPolygonAgainstZ, type WorldPt } from './renderer.ts';
+import { clipPolygonAgainstZ, computeInterpolatedShips, type WorldPt } from './renderer.ts';
+import { buildInitialClientState } from '../state.ts';
+import type { ShipSnapshot } from '../../shared/protocol.ts';
 
 /**
  * Micro-benchmarks for the rendering hot path. Run with `npx vitest bench`.
@@ -28,6 +30,49 @@ const buildBandPoly = (vertexCount: number, frontFraction: number): WorldPt[] =>
   }
   return out;
 };
+
+/**
+ * Synthesize a 99-ship state with two snapshots so the interpolation path
+ * runs the actual lerp branch, not the early-return.
+ */
+const buildShipState = (count: number) => {
+  const mkSnap = (offset: number): { ships: ShipSnapshot[]; receivedAt: number } => ({
+    receivedAt: 1000 + offset,
+    ships: Array.from({ length: count }, (_, i) => ({
+      id: `s${i}`,
+      x: (i % 16) * 30 + offset * 5,
+      y: Math.floor(i / 16) * 30,
+      h: (i / count) * Math.PI * 2,
+      vx: 30,
+      vy: 0,
+      p: 1,
+      k: 0,
+      l: 0,
+      a: i,
+      f: 0,
+    })),
+  });
+  const a = mkSnap(0);
+  const b = mkSnap(50);
+  return {
+    ...buildInitialClientState(),
+    snapshots: [
+      { tick: 0, time: 0, receivedAt: a.receivedAt, ships: a.ships, racersLeft: count, pk: 0 },
+      { tick: 1, time: 0.05, receivedAt: b.receivedAt, ships: b.ships, racersLeft: count, pk: 0 },
+    ],
+  };
+};
+
+describe('computeInterpolatedShips', () => {
+  const s99 = buildShipState(99);
+  const s50 = buildShipState(50);
+  bench('99 ships, mid-interpolation', () => {
+    computeInterpolatedShips(s99, 1080);
+  });
+  bench('50 ships, mid-interpolation', () => {
+    computeInterpolatedShips(s50, 1080);
+  });
+});
 
 describe('clipPolygonAgainstZ', () => {
   const small = buildBandPoly(200, 0.5);

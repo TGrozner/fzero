@@ -108,19 +108,18 @@ export const applyPickups = (
       // Hit.
       hits.push({ idx: i, kind: spec.kind, vehicleId: v.id });
       newRespawn[i] = raceTime + PICKUP_RESPAWN_S;
-      let updated = v;
       if (spec.kind === 'boost') {
-        updated = {
+        out[j] = {
           ...v,
           power: clamp(v.power + BOOST_PICKUP_POWER, 0, 1),
           freeBoostUntil: Math.max(v.freeBoostUntil, raceTime + BOOST_PICKUP_DURATION_S),
         };
       } else if (spec.kind === 'heal') {
-        updated = { ...v, power: clamp(v.power + HEAL_PICKUP_POWER, 0, 1) };
+        out[j] = { ...v, power: clamp(v.power + HEAL_PICKUP_POWER, 0, 1) };
       } else {
         const newPower = clamp(v.power - MINE_PICKUP_DAMAGE, 0, 1);
         const ko = newPower <= 0;
-        updated = {
+        out[j] = {
           ...v,
           power: newPower,
           ko,
@@ -128,7 +127,6 @@ export const applyPickups = (
         };
         if (ko && !v.ko) kos.push(v.id);
       }
-      out[j] = updated;
       // Pad consumed; stop checking other vehicles for this pad this frame.
       break;
     }

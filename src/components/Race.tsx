@@ -4,6 +4,7 @@ import { useGameLoop } from '../hooks/useGameLoop.ts';
 import { useKeyboard, keyboardToInput } from '../hooks/useKeyboard.ts';
 import { HUD } from './HUD.tsx';
 import { renderFrame, renderMinimap, setupCanvas, RenderState } from '../render/renderer.ts';
+import { ProfileOverlay } from './ProfileOverlay.tsx';
 import { encodeInput } from '../../shared/protocol.ts';
 import type { SocketAPI } from '../hooks/useGameSocket.ts';
 import { FLAG_KO } from '../../shared/protocol.ts';
@@ -23,9 +24,19 @@ export function Race({ state, dispatch, socket, onLeave }: Props) {
   const lastInputSentRef = useRef(0);
   const lastPowerRef = useRef<number | null>(null);
   const shakeUntilRef = useRef(0);
+  const lastFrameMsRef = useRef<number | null>(null);
+  const frameMsAccRef = useRef<number[]>([]);
 
   const [spinFlash, setSpinFlash] = useState(false);
   const [sideRing, setSideRing] = useState<-1 | 1 | null>(null);
+  const profileEnabled =
+    typeof window !== 'undefined' &&
+    new URLSearchParams(window.location.search).get('profile') === '1';
+  const [profileSnapshot, setProfileSnapshot] = useState<{
+    fps: number;
+    p99: number;
+    particles: number;
+  }>({ fps: 60, p99: 16, particles: 0 });
 
   const handlePress = (action: 'pause' | 'menu') => {
     if (action === 'pause') dispatch({ type: 'TOGGLE_PAUSE' });
@@ -81,6 +92,26 @@ export function Race({ state, dispatch, socket, onLeave }: Props) {
     if (!rc) return;
     const now = performance.now();
     if (!state.paused) renderFrame(rc, state, renderRef.current, now);
+    if (profileEnabled) {
+      const last = lastFrameMsRef.current;
+      lastFrameMsRef.current = now;
+      if (last !== null) {
+        const dtMs = now - last;
+        const acc = frameMsAccRef.current;
+        acc.push(dtMs);
+        if (acc.length > 90) acc.shift();
+        if (acc.length >= 30 && acc.length % 12 === 0) {
+          const sorted = [...acc].sort((a, b) => a - b);
+          const p99 = sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * 0.99))] ?? dtMs;
+          const avg = acc.reduce((a, b) => a + b, 0) / acc.length;
+          setProfileSnapshot({
+            fps: Math.round(1000 / Math.max(0.1, avg)),
+            p99: Math.round(p99),
+            particles: renderRef.current.particleCount(),
+          });
+        }
+      }
+    }
     // Minimap.
     const mm = minimapRef.current;
     if (mm) {
@@ -184,6 +215,13 @@ export function Race({ state, dispatch, socket, onLeave }: Props) {
           <div key={`${k.id}-${k.at}`} className="fx-ko-pop">+1 KO</div>
         ))}
       </div>
+      {profileEnabled && (
+        <ProfileOverlay
+          fps={profileSnapshot.fps}
+          p99={profileSnapshot.p99}
+          particles={profileSnapshot.particles}
+        />
+      )}
       {state.rttMs !== null && (
         <div
           style={{

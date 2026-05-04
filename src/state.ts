@@ -20,6 +20,15 @@ export type PickupEvent = {
   readonly at: number;
 };
 
+export type KoLogEntry = {
+  readonly id: string;
+  readonly by: string | null;
+  readonly time: number;
+  /** Snapshot position at the time the KO was received, or null if unknown. */
+  readonly x: number | null;
+  readonly y: number | null;
+};
+
 export type Standing = {
   id: string;
   position: number;
@@ -56,6 +65,8 @@ export type ClientState = {
   myKos: readonly { id: string; at: number }[];
   /** Recent pickup events — retained briefly so the renderer can spawn FX. */
   pickupEvents: readonly PickupEvent[];
+  /** Last N KOs in chronological order — surfaced on the results screen. */
+  koLog: readonly KoLogEntry[];
 };
 
 export const buildInitialClientState = (): ClientState => ({
@@ -78,6 +89,7 @@ export const buildInitialClientState = (): ClientState => ({
   error: null,
   myKos: [],
   pickupEvents: [],
+  koLog: [],
 });
 
 export type Action =
@@ -111,7 +123,15 @@ export const reducer = (state: ClientState, action: Action): ClientState => {
     case 'CONNECTED':
       return { ...state, status: 'connected' };
     case 'DISCONNECTED':
-      return { ...state, status: 'closed', view: 'menu', myId: null, snapshots: [], paused: false };
+      return {
+        ...state,
+        status: 'closed',
+        view: 'menu',
+        myId: null,
+        snapshots: [],
+        paused: false,
+        koLog: [],
+      };
     case 'CONNECTION_ERROR':
       return { ...state, status: 'error', error: action.error, view: 'menu' };
     case 'SET_VIEW':
@@ -197,10 +217,25 @@ const applyServer = (
       // Drop popups older than 2s.
       const cutoff = now - 2000;
       const fresh = state.myKos.filter((k) => k.at > cutoff);
-      if (msg.by !== state.myId) {
-        return fresh.length === state.myKos.length ? state : { ...state, myKos: fresh };
+      // Capture the victim's position from the latest snapshot for the
+      // results-screen recap.
+      const last = state.snapshots[state.snapshots.length - 1];
+      const victim = last?.ships.find((s) => s.id === msg.id);
+      const entry: KoLogEntry = {
+        id: msg.id,
+        by: msg.by,
+        time: msg.time,
+        x: victim ? victim.x : null,
+        y: victim ? victim.y : null,
+      };
+      const koLog = [...state.koLog, entry].slice(-12);
+      const next: ClientState = { ...state, koLog };
+      if (msg.by === state.myId) {
+        next.myKos = [...fresh, { id: msg.id, at: now }];
+      } else if (fresh.length !== state.myKos.length) {
+        next.myKos = fresh;
       }
-      return { ...state, myKos: [...fresh, { id: msg.id, at: now }] };
+      return next;
     }
     case 'results':
       return {
