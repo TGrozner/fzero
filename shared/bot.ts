@@ -6,9 +6,15 @@ import {
   clamp,
   fromAngle,
   perp,
+  scale,
   wrapAngle,
   angleOf,
 } from './vec2.ts';
+
+const normalizedOrZero = (v: Vec2): Vec2 => {
+  const l = length(v);
+  return l < 1e-6 ? { x: 0, y: 0 } : scale(v, 1 / l);
+};
 import { closestOnTrack, lookaheadPoint, type Track } from './track.ts';
 import { type Vehicle, type VehicleInput, NEUTRAL_INPUT } from './physics.ts';
 import { hashString, createRng } from './rng.ts';
@@ -149,25 +155,59 @@ export const botInput = (
     }
   }
 
-  // Side attack if a target is right beside us.
+  // Side attacks: pure-aggression opportunity (rare, random) PLUS a
+  // defensive trigger — if a fast-closing enemy is directly to one side and
+  // approaching, fire toward them. This makes bots feel like they actively
+  // defend their racing line instead of just bumping along.
   let sideLeft = false;
   let sideRight = false;
-  if (bot.sideCd <= 0 && profile.aggression > 0.4) {
+  if (bot.sideCd <= 0) {
     for (const o of others) {
       if (o.id === bot.id || o.ko || o.skywayUntil > raceTime) continue;
       const rel = sub(o.pos, bot.pos);
       const dist = length(rel);
       if (dist > 9) continue;
       const lat = dot(rel, right);
-      if (Math.random() < profile.aggression * 0.03) {
+      // Defensive: an enemy on our side closing in faster than us → parry.
+      const closingSpeed = -dot(sub(o.vel, bot.vel), normalizedOrZero(rel));
+      const defensive =
+        Math.abs(lat) > 2 &&
+        closingSpeed > 30 &&
+        profile.aggression > 0.25;
+      const opportunistic =
+        profile.aggression > 0.4 && Math.random() < profile.aggression * 0.03;
+      if (defensive || opportunistic) {
         if (lat > 0) sideRight = true;
         else sideLeft = true;
       }
     }
   }
 
-  // Skyway when meter full and risk-takers say so.
-  const skyway = bot.koMeter >= 1 && Math.random() < profile.riskTaking * 0.5;
+  // Skyway: tactical use only — fire when surrounded by ≥3 close enemies, or
+  // when low HP and an attacker is closing. Risk-takers also fire prophy-
+  // lactically on long curves but no longer on pure RNG.
+  let skyway = false;
+  if (bot.koMeter >= 1) {
+    let closeCount = 0;
+    let inDanger = false;
+    for (const o of others) {
+      if (o.id === bot.id || o.ko || o.skywayUntil > raceTime) continue;
+      const rel = sub(o.pos, bot.pos);
+      const dist = length(rel);
+      if (dist > 14) continue;
+      closeCount++;
+      // "Danger": enemy closing on us from front-ish at speed.
+      const ahead = dot(rel, fwd);
+      const closingSpeed = -dot(sub(o.vel, bot.vel), normalizedOrZero(rel));
+      if (ahead > 0 && closingSpeed > 40) inDanger = true;
+    }
+    if (closeCount >= 3) skyway = true;
+    else if (bot.power < 0.35 && inDanger) skyway = true;
+    // Cautious bots will NOT pop skyway just because the meter's full —
+    // they wait for a real threat. Risk-takers occasionally fire it on
+    // curves (weak random, scaled down hard).
+    else if (profile.riskTaking > 0.7 && Math.random() < 0.005) skyway = true;
+  }
 
   return {
     throttle,

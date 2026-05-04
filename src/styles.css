@@ -195,6 +195,13 @@ input[type='text']:focus {
   text-align: center;
 }
 
+.track-pb {
+  margin-top: 4px;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.05em;
+}
+
 .canvas-wrap {
   position: absolute;
   inset: 0;
@@ -356,6 +363,32 @@ canvas {
   15%  { opacity: 1; transform: scale(1.1) skewX(-4deg); }
   35%  { opacity: 1; transform: scale(1.0) skewX(0); }
   100% { opacity: 0; transform: scale(0.95) skewX(0); }
+}
+
+/* Personal-best toast — slides in from the top under the lap fanfare. */
+.fx-pb {
+  position: absolute;
+  top: 110px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  padding: 6px 14px;
+  border-radius: 4px;
+  border: 1px solid var(--ko);
+  background: rgba(255, 210, 58, 0.15);
+  color: var(--ko);
+  text-shadow: 0 0 8px rgba(255, 210, 58, 0.6);
+  pointer-events: none;
+  z-index: 41;
+  animation: fx-pb 1.8s ease-out forwards;
+}
+@keyframes fx-pb {
+  0%   { opacity: 0; transform: translate(-50%, -8px) scale(0.9); }
+  20%  { opacity: 1; transform: translate(-50%, 0) scale(1); }
+  80%  { opacity: 1; }
+  100% { opacity: 0; transform: translate(-50%, -8px); }
 }
 
 /* Lap fanfare: big neon banner that crosses the screen briefly on lap. */
@@ -718,8 +751,24 @@ canvas {
   filter: drop-shadow(0 0 12px var(--accent));
 }
 
-.pause-overlay h2 {
-  font-size: 70px;
+.pause-overlay {
+  pointer-events: auto;
+}
+.pause-panel {
+  background: rgba(10, 4, 32, 0.92);
+  border: 1px solid var(--accent-2);
+  border-radius: 10px;
+  padding: 24px 32px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  box-shadow: 0 0 30px rgba(58, 255, 225, 0.18);
+  min-width: 280px;
+  text-align: center;
+}
+.pause-panel h2 {
+  margin: 0;
+  font-size: 36px;
   letter-spacing: 0.3em;
   text-transform: uppercase;
   color: var(--accent-2);

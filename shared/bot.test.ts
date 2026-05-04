@@ -125,6 +125,38 @@ describe('botInput', () => {
     expect(rM.steer).toBeLessThan(r0.steer);
   });
 
+  it('fires skyway when surrounded by ≥3 close enemies (KO meter full)', () => {
+    const v = { ...createVehicle('b', track.startPosition, 0), koMeter: 1 };
+    const close = (offset: number, id: string) =>
+      createVehicle(id, { x: track.startPosition.x + offset, y: track.startPosition.y }, 0);
+    const others = [close(8, 'x'), close(-7, 'y'), close(0, 'z')];
+    const profile = { skill: 1, aggression: 0.5, riskTaking: 0 };
+    const r = botInput(v, others, track, profile, 0);
+    expect(r.skyway).toBe(true);
+  });
+
+  it('does NOT fire skyway when threats are far away', () => {
+    const v = { ...createVehicle('b', track.startPosition, 0), koMeter: 1 };
+    const far = createVehicle('x', { x: track.startPosition.x + 80, y: track.startPosition.y }, 0);
+    const profile = { skill: 1, aggression: 0.5, riskTaking: 0 };
+    // riskTaking=0 + zero close threats = no skyway despite full meter.
+    const r = botInput(v, [far], track, profile, 0);
+    expect(r.skyway).toBe(false);
+  });
+
+  it('parries with a defensive side attack when an enemy closes from a side', () => {
+    // Enemy on bot's right side, closing in fast.
+    const v = { ...createVehicle('b', { x: 0, y: 0 }, 0), vel: { x: 50, y: 0 }, sideCd: 0 };
+    const enemy = {
+      ...createVehicle('e', { x: 1, y: 5 }, 0),
+      vel: { x: 50, y: -50 },
+    };
+    const profile = { skill: 1, aggression: 0.4, riskTaking: 0 };
+    const r = botInput(v, [enemy], track, profile, 0);
+    // Right of heading=0 is +y, so a closer at +y triggers sideRight.
+    expect(r.sideRight).toBe(true);
+  });
+
   it('ignores pickups behind the bot', () => {
     const heading = Math.atan2(track.startHeading.y, track.startHeading.x);
     const v = {

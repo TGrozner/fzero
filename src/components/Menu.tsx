@@ -1,6 +1,7 @@
 import type { Action } from '../state.ts';
 import { SHIP_CLASSES, SHIP_COLORS, type ShipClass } from '../../shared/constants.ts';
 import { TRACKS } from '../../shared/track.ts';
+import { type BestTimesStore, formatTimeMs, loadBestTimes } from '../storage/bestTimes.ts';
 
 type Props = {
   pseudo: string;
@@ -36,6 +37,12 @@ export function Menu({
   busy,
 }: Props) {
   const canStart = pseudo.trim().length >= 1 && !busy;
+  // PBs are read on every render — the file lives in localStorage, the
+  // call is cheap (a JSON.parse of a tiny object), and the menu is not
+  // perf-sensitive. Reading lazily here means the menu always reflects
+  // whatever the Race component most-recently saved.
+  const bestTimes: BestTimesStore = loadBestTimes();
+  const pb = bestTimes[trackId];
   return (
     <div className="menu" data-testid="menu">
       <h1>F-ZERO 99</h1>
@@ -114,6 +121,22 @@ export function Menu({
             </option>
           ))}
         </select>
+        <div className="track-pb" data-testid="track-pb">
+          {pb?.bestLapMs != null ? (
+            <span>
+              <span style={{ color: 'var(--muted)' }}>Best lap </span>
+              <strong style={{ color: 'var(--ko)' }}>{formatTimeMs(pb.bestLapMs)}</strong>
+            </span>
+          ) : (
+            <span style={{ color: 'var(--muted)' }}>No PB yet</span>
+          )}
+          {pb?.bestRaceMs != null && (
+            <span>
+              <span style={{ color: 'var(--muted)', marginLeft: 12 }}>· Race </span>
+              <strong style={{ color: 'var(--accent-2)' }}>{formatTimeMs(pb.bestRaceMs)}</strong>
+            </span>
+          )}
+        </div>
       </div>
       <div className="row" style={{ flexDirection: 'column', alignItems: 'stretch', gap: 4 }}>
         <label htmlFor="room">Room (optional)</label>
