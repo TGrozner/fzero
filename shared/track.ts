@@ -180,27 +180,47 @@ export const edgePoint = (track: Track, segIdx: number, t: number, side: 1 | -1)
   return add(center, scale(normal, side * track.halfWidth));
 };
 
-/** Starting positions for N players: rows of up to 6 staggered behind the start line. */
+/**
+ * Place N starting positions in rows behind the start line, following the
+ * curvature of the track (so rear rows stay on-track even on a tight oval).
+ * Each row is anchored at a centerline arc length walking backward from the
+ * start line; lateral offset uses the local tangent + normal at that arc point.
+ */
 export const startingGrid = (track: Track, playerCount: number): Vec2[] => {
   const c0 = track.checkpoints[0] as number;
-  const a = track.centerline[c0] as Vec2;
-  const b = track.centerline[(c0 + 1) % track.centerline.length] as Vec2;
-  const tangent = normalize(sub(b, a));
-  const normal = perp(tangent);
-  const positions: Vec2[] = [];
+  const startArc = track.cumulative[c0] as number;
   const colsPerRow = 6;
   const lateralStep = (track.halfWidth * 1.6) / Math.max(1, colsPerRow - 1);
-  const longitudinalStep = 7;
+  const longitudinalStep = 14; // wider than the spin-attack radius (12) so neighbors are out of range
+
+  const positions: Vec2[] = [];
   for (let i = 0; i < playerCount; i++) {
     const row = Math.floor(i / colsPerRow);
     const col = i % colsPerRow;
+    const longitudinal = row * longitudinalStep + 4;
+    // Walk backward along the centerline by `longitudinal` units.
+    let arc = startArc - longitudinal;
+    while (arc < 0) arc += track.length;
+    // Find the segment at that arc length.
+    let segIdx = 0;
+    let segT = 0;
+    for (let j = 0; j < track.centerline.length; j++) {
+      const segStart = track.cumulative[j] as number;
+      const segEnd = track.cumulative[j + 1] as number;
+      if (arc >= segStart && arc <= segEnd) {
+        segIdx = j;
+        const segLen = segEnd - segStart;
+        segT = segLen === 0 ? 0 : (arc - segStart) / segLen;
+        break;
+      }
+    }
+    const segA = track.centerline[segIdx] as Vec2;
+    const segB = track.centerline[(segIdx + 1) % track.centerline.length] as Vec2;
+    const center = add(segA, scale(sub(segB, segA), segT));
+    const tangent = normalize(sub(segB, segA));
+    const normal = perp(tangent);
     const lateral = (col - (colsPerRow - 1) / 2) * lateralStep;
-    const longitudinal = -row * longitudinalStep - 4;
-    const pos = add(
-      a,
-      add(scale(tangent, longitudinal), scale(normal, lateral)),
-    );
-    positions.push(pos);
+    positions.push(add(center, scale(normal, lateral)));
   }
   return positions;
 };

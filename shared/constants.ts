@@ -33,6 +33,9 @@ export const SKYWAY_SPEED_BONUS = 1.3;
 export const KO_METER_PER_CHECKPOINT = 0.06;
 export const KO_METER_PER_KO = 0.25;
 
+/** Seconds of spawn protection at the start of a race (no damage taken). */
+export const SPAWN_PROTECTION_S = 2.5;
+
 /** Damage parameters. */
 export const SPIN_ATTACK_RADIUS = 12;
 export const SPIN_ATTACK_DAMAGE = 0.18;

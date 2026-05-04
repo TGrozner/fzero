@@ -91,17 +91,21 @@ export const botInput = (
   const wantBoost = aligned && bot.power > 0.55 && profile.skill > 0.4;
 
   // Spin attack when there is an enemy very close in front.
+  // Per-frame trigger rate is scaled down so even fully-aggressive bots only
+  // fire ~1-2 times per second, instead of 27 times like the raw probability.
   let spin = false;
-  for (const o of others) {
-    if (o.id === bot.id || o.ko || o.skywayUntil > raceTime) continue;
-    const rel = sub(o.pos, bot.pos);
-    const dist = length(rel);
-    if (dist > 12) continue;
-    const forwardDot = dot(rel, fwd);
-    if (forwardDot < 0) continue;
-    if (Math.random() < profile.aggression && bot.spinCd <= 0) {
-      spin = true;
-      break;
+  if (bot.spinCd <= 0) {
+    for (const o of others) {
+      if (o.id === bot.id || o.ko || o.skywayUntil > raceTime) continue;
+      const rel = sub(o.pos, bot.pos);
+      const dist = length(rel);
+      if (dist > 12) continue;
+      const forwardDot = dot(rel, fwd);
+      if (forwardDot < 0) continue;
+      if (Math.random() < profile.aggression * 0.04) {
+        spin = true;
+        break;
+      }
     }
   }
 
@@ -116,7 +120,7 @@ export const botInput = (
       const dist = length(rel);
       if (dist > 9) continue;
       const lat = dot(rel, right);
-      if (Math.random() < profile.aggression * 0.6) {
+      if (Math.random() < profile.aggression * 0.03) {
         if (lat > 0) sideRight = true;
         else sideLeft = true;
       }

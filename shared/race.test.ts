@@ -49,6 +49,26 @@ describe('updateLapProgress', () => {
     expect(v.finishTime).toBe(12.34);
   });
 
+  it('does NOT spuriously advance lap when spawned behind start on a closed track', () => {
+    // Place a vehicle physically behind the start line. closestOnTrack will
+    // return a near-trackLen arc value because the centerline wraps; the lap
+    // counter must recognise this as "pre-start" and not count it as having
+    // completed a lap.
+    const startCpIdx = track.checkpoints[0] as number;
+    const segA = track.centerline[startCpIdx] as { x: number; y: number };
+    const segB = track.centerline[(startCpIdx + 1) % track.centerline.length] as { x: number; y: number };
+    const tx = segB.x - segA.x;
+    const ty = segB.y - segA.y;
+    const len = Math.hypot(tx, ty) || 1;
+    // Move ~30 units backward along the start tangent.
+    const behind = { x: segA.x - (tx / len) * 30, y: segA.y - (ty / len) * 30 };
+    const v = createVehicle('p', behind, 0);
+    const after = updateLapProgress(v, config, 0);
+    expect(after.lap).toBe(0);
+    expect(after.finished).toBe(false);
+    expect(after.arcLength).toBeLessThanOrEqual(0);
+  });
+
   it('does nothing if vehicle finished or KO', () => {
     const fin = { ...createVehicle('p', track.startPosition, 0), finished: true };
     const ko = { ...createVehicle('p', track.startPosition, 0), ko: true };
@@ -132,7 +152,7 @@ describe('stepRace', () => {
     const inputs = new Map<string, VehicleInput>([
       ['a', { ...NEUTRAL_INPUT, spin: true }],
     ]);
-    const r = stepRace([attacker, victim], inputs, config, 1 / 30, 1);
+    const r = stepRace([attacker, victim], inputs, config, 1 / 30, 5);
     expect(r.kos).toContain('b');
   });
 
@@ -149,6 +169,28 @@ describe('stepRace', () => {
     const v = createVehicle('a', track.startPosition, 0);
     const r = stepRace([v], new Map(), config, 1 / 30, 0);
     expect(r.vehicles[0]?.vel.x).toBeCloseTo(0);
+  });
+
+  it('grants spawn protection: no damage and no spin attacks for first 2.5s', () => {
+    const start = track.startPosition;
+    const attacker = createVehicle('a', start, 0);
+    const victim = {
+      ...createVehicle('b', { x: start.x + 4, y: start.y + 2 }, 0),
+      power: 0.05,
+    };
+    const inputs = new Map<string, VehicleInput>([
+      ['a', { ...NEUTRAL_INPUT, spin: true }],
+    ]);
+    const r = stepRace([attacker, victim], inputs, config, 1 / 30, 0.5);
+    expect(r.kos).toEqual([]);
+    expect(r.vehicles.find((v) => v.id === 'b')?.power).toBe(1);
+  });
+
+  it('off-track vehicles take no damage during spawn protection', () => {
+    const v = { ...createVehicle('p', v2(10000, 10000), 0), power: 0.1 };
+    const r = stepRace([v], new Map(), config, 1 / 30, 0.5);
+    expect(r.vehicles[0]?.power).toBe(1);
+    expect(r.vehicles[0]?.ko).toBe(false);
   });
 });
 

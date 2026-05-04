@@ -35,9 +35,9 @@ type CamPose = {
 
 type Projected = { sx: number; sy: number; depth: number; visible: boolean };
 
-const NEAR_PLANE = 1.5;
-const SEGMENTS_AHEAD = 36;
-const SEGMENTS_BEHIND = 4;
+const NEAR_PLANE = 0.5;
+const SEGMENTS_AHEAD = 80;
+const SEGMENTS_BEHIND = 2;
 const ROT_LERP = 0.18;
 const INTERP_DELAY_MS = 80;
 
@@ -321,10 +321,13 @@ const drawShip = (
   const pivot = project(ship.x, ship.y, cam, cfg, width);
   if (!pivot.visible) return;
 
-  // Compute screen-aligned size that scales with depth.
-  const size = Math.max(3, Math.min(60, (cfg.focal * 6) / pivot.depth));
-  // Heading relative to camera (so the ship rotates correctly in view).
-  const relHeading = wrapAngle(ship.h - cam.heading) - Math.PI / 2;
+  // Screen size scales with depth, capped to avoid huge sprites near camera.
+  const baseSize = isMe ? 22 : 18;
+  const size = Math.max(2.5, Math.min(baseSize, (cfg.focal * 2.4) / pivot.depth));
+  // Body sprite is drawn with its nose at -Y (canvas up). Camera projection
+  // already aligns the camera's forward with screen up, so we just rotate by
+  // the ship's heading delta from the camera.
+  const relHeading = wrapAngle(ship.h - cam.heading);
 
   ctx.save();
   ctx.translate(pivot.sx, pivot.sy);

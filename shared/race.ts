@@ -13,6 +13,7 @@ import {
   LAST_N_BOOST_DURATION_S,
   LAST_N_BOOST_THRESHOLD,
   SKYWAY_DURATION_S,
+  SPAWN_PROTECTION_S,
   TOTAL_LAPS,
   VEHICLE_RADIUS,
 } from './constants.ts';
@@ -46,8 +47,14 @@ export const updateLapProgress = (
   const projected = lapBase + c.arcLength;
   let newArc = v.arcLength;
   if (projected + trackLen / 2 < v.arcLength) {
-    // Wrapped past start.
+    // Forward wrap past the start/finish line — we just completed a lap.
     newArc = projected + trackLen;
+  } else if (projected > v.arcLength + trackLen / 2) {
+    // Our actual position projects on the opposite side of the wrap from our
+    // current arc. This happens for ships sitting *behind* the start line on
+    // a closed track: closestOnTrack returns a near-trackLen arc value, but
+    // we're really at a slightly-negative race progress. Mirror it.
+    newArc = projected - trackLen;
   } else if (projected > v.arcLength) {
     newArc = projected;
   }
@@ -126,29 +133,39 @@ export const stepRace = (
   dt: number,
   raceTime: number,
 ): { vehicles: Vehicle[]; kos: string[] } => {
+  // During the spawn-protection window, strip all attack flags.
+  const protect = raceTime < SPAWN_PROTECTION_S;
   let stepped = vehicles.map((v) => {
-    const input = inputs.get(v.id) ?? {
-      throttle: 0,
-      steer: 0,
-      boost: false,
-      spin: false,
-      sideLeft: false,
-      sideRight: false,
-      skyway: false,
-    };
-    return stepVehicle(v, input, config.track, dt, raceTime, config.params);
+    const raw = inputs.get(v.id);
+    const input = raw
+      ? protect
+        ? { ...raw, spin: false, sideLeft: false, sideRight: false }
+        : raw
+      : {
+          throttle: 0,
+          steer: 0,
+          boost: false,
+          spin: false,
+          sideLeft: false,
+          sideRight: false,
+          skyway: false,
+        };
+    const next = stepVehicle(v, input, config.track, dt, raceTime, config.params);
+    // While protected, freeze power at 1 — no off-track / wall damage either.
+    return protect ? { ...next, power: 1, ko: false } : next;
   });
 
   const allKos: string[] = [];
 
-  // Spin attacks: process each vehicle whose input.spin is true.
-  for (let i = 0; i < stepped.length; i++) {
-    const attacker = stepped[i] as Vehicle;
-    const input = inputs.get(attacker.id);
-    if (!input?.spin) continue;
-    const result = applySpinAttack(attacker, stepped, raceTime);
-    stepped = result.others.map((v) => (v.id === attacker.id ? result.attacker : v));
-    allKos.push(...result.kos);
+  if (!protect) {
+    for (let i = 0; i < stepped.length; i++) {
+      const attacker = stepped[i] as Vehicle;
+      const input = inputs.get(attacker.id);
+      if (!input?.spin) continue;
+      const result = applySpinAttack(attacker, stepped, raceTime);
+      stepped = result.others.map((v) => (v.id === attacker.id ? result.attacker : v));
+      allKos.push(...result.kos);
+    }
   }
 
   // Skyway requests.

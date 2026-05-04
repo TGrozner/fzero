@@ -58,10 +58,12 @@ export const useGameSocket = (
 };
 
 const buildUrl = (trackId: string): string => {
-  const base = `${resolveServerUrl()}?track=${encodeURIComponent(trackId)}`;
+  let base = `${resolveServerUrl()}?track=${encodeURIComponent(trackId)}`;
   if (typeof window !== 'undefined') {
     const params = new URLSearchParams(window.location.search);
-    if (params.get('fast') === '1') return `${base}&fast=1`;
+    if (params.get('fast') === '1') base += '&fast=1';
+    const room = params.get('room');
+    if (room) base += `&room=${encodeURIComponent(room)}`;
   }
   return base;
 };
