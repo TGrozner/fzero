@@ -3,7 +3,7 @@ import { type ClientState, type Action, findMyShip } from '../state.ts';
 import { useGameLoop } from '../hooks/useGameLoop.ts';
 import { useKeyboard, keyboardToInput } from '../hooks/useKeyboard.ts';
 import { HUD } from './HUD.tsx';
-import { renderFrame, renderMinimap, setupCanvas, TrailCache } from '../render/renderer.ts';
+import { renderFrame, renderMinimap, setupCanvas, RenderState } from '../render/renderer.ts';
 import { encodeInput } from '../../shared/protocol.ts';
 import type { SocketAPI } from '../hooks/useGameSocket.ts';
 import { FLAG_KO } from '../../shared/protocol.ts';
@@ -18,7 +18,7 @@ type Props = {
 export function Race({ state, dispatch, socket, onLeave }: Props) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const minimapRef = useRef<HTMLCanvasElement | null>(null);
-  const trails = useRef(new TrailCache());
+  const renderRef = useRef(new RenderState());
   const lastInputSentRef = useRef(0);
 
   const handlePress = (action: 'pause' | 'menu') => {
@@ -46,7 +46,7 @@ export function Race({ state, dispatch, socket, onLeave }: Props) {
     const rc = setupCanvas(canvas);
     if (!rc) return;
     const now = performance.now();
-    if (!state.paused) renderFrame(rc, state, trails.current, now);
+    if (!state.paused) renderFrame(rc, state, renderRef.current, now);
     // Minimap.
     const mm = minimapRef.current;
     if (mm) {

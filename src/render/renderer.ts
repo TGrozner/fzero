@@ -5,7 +5,7 @@ import { trackEdges } from '../../shared/track.ts';
 import { type ClientState } from '../state.ts';
 import { findTrack } from '../../shared/track.ts';
 import { type PlayerInfoMsg } from '../../shared/protocol.ts';
-import { lerpAngle } from '../../shared/vec2.ts';
+import { lerpAngle, wrapAngle } from '../../shared/vec2.ts';
 
 export type RenderContext = {
   ctx: CanvasRenderingContext2D;
@@ -14,8 +14,24 @@ export type RenderContext = {
   dpr: number;
 };
 
-const VIEW_BASE = 700; // world units visible across the canvas at speed 0
-const VIEW_SPEED_FACTOR = 1.4; // additional units per speed unit
+/**
+ * F-Zero-style "world rotates around the ship" camera.
+ * The world point (worldX, worldY) is rendered at screen (anchorX, anchorY),
+ * with the world rotated by `rotation` so the ship's heading points up.
+ */
+export type Camera = {
+  worldX: number;
+  worldY: number;
+  zoom: number;
+  rotation: number;
+  anchorX: number;
+  anchorY: number;
+};
+
+const VIEW_BASE = 520; // base world units across the smaller screen dimension at speed 0
+const VIEW_SPEED_FACTOR = 1.0;
+const ANCHOR_Y_FRAC = 0.72; // ship near the lower part of the screen
+const ROT_LERP = 0.18; // smoothing factor on rotation per frame
 
 const interpolate = (
   prev: ShipSnapshot | undefined,
@@ -34,10 +50,6 @@ const interpolate = (
   };
 };
 
-/**
- * Compute interpolated ship state at the current display time.
- * We render slightly behind the latest snapshot to allow smooth interpolation.
- */
 const INTERP_DELAY_MS = 80;
 
 export const computeInterpolatedShips = (
@@ -48,7 +60,6 @@ export const computeInterpolatedShips = (
   if (state.snapshots.length === 0) return out;
   const newest = state.snapshots[state.snapshots.length - 1] as (typeof state.snapshots)[number];
   const renderTime = nowMs - INTERP_DELAY_MS;
-  // Find the two snapshots that bracket renderTime (use receivedAt as wall clock).
   let prev: typeof newest | undefined;
   let next: typeof newest = newest;
   for (let i = state.snapshots.length - 1; i >= 0; i--) {
@@ -72,30 +83,53 @@ export const computeInterpolatedShips = (
   return out;
 };
 
-/** Trails: store last few positions per ship. */
-export class TrailCache {
+/** Persistent render state: trails + smoothed camera rotation. */
+export class RenderState {
   private trails = new Map<string, { x: number; y: number }[]>();
-  update(ships: Map<string, { x: number; y: number }>) {
+  /** Last applied camera rotation (radians), used for smoothing. */
+  private smoothedRotation: number | null = null;
+
+  updateTrails(ships: Map<string, { x: number; y: number }>) {
     for (const [id, pos] of ships) {
       const arr = this.trails.get(id) ?? [];
       arr.push({ x: pos.x, y: pos.y });
       if (arr.length > 8) arr.shift();
       this.trails.set(id, arr);
     }
-    // Drop trails for ships no longer present.
     for (const id of [...this.trails.keys()]) {
       if (!ships.has(id)) this.trails.delete(id);
     }
   }
-  get(id: string): readonly { x: number; y: number }[] {
+
+  trail(id: string): readonly { x: number; y: number }[] {
     return this.trails.get(id) ?? [];
   }
-  clear() {
+
+  /** Smooth a target rotation toward the previous value. */
+  smoothRotation(target: number): number {
+    if (this.smoothedRotation === null) {
+      this.smoothedRotation = target;
+      return target;
+    }
+    const delta = wrapAngle(target - this.smoothedRotation);
+    this.smoothedRotation = this.smoothedRotation + delta * ROT_LERP;
+    return this.smoothedRotation;
+  }
+
+  reset(): void {
     this.trails.clear();
+    this.smoothedRotation = null;
   }
 }
 
-/** Resize the canvas and return the rendering context info. */
+/** Apply the camera transform on the canvas (translate → rotate → scale → translate). */
+const applyCamera = (ctx: CanvasRenderingContext2D, cam: Camera): void => {
+  ctx.translate(cam.anchorX, cam.anchorY);
+  ctx.rotate(cam.rotation);
+  ctx.scale(cam.zoom, cam.zoom);
+  ctx.translate(-cam.worldX, -cam.worldY);
+};
+
 export const setupCanvas = (canvas: HTMLCanvasElement): RenderContext | null => {
   const ctx = canvas.getContext('2d', { alpha: false });
   if (!ctx) return null;
@@ -107,16 +141,12 @@ export const setupCanvas = (canvas: HTMLCanvasElement): RenderContext | null => 
   return { ctx, width: rect.width, height: rect.height, dpr };
 };
 
-const drawTrack = (rc: RenderContext, track: Track, camera: { x: number; y: number; zoom: number }) => {
-  const { ctx, width, height } = rc;
-  const cx = width / 2;
-  const cy = height / 2;
+const drawTrack = (rc: RenderContext, track: Track, cam: Camera) => {
+  const { ctx } = rc;
   ctx.save();
-  ctx.translate(cx, cy);
-  ctx.scale(camera.zoom, camera.zoom);
-  ctx.translate(-camera.x, -camera.y);
+  applyCamera(ctx, cam);
 
-  // Track surface: thick polyline with shadow.
+  // Track surface.
   ctx.strokeStyle = '#15082a';
   ctx.lineWidth = track.halfWidth * 2;
   ctx.lineCap = 'round';
@@ -144,13 +174,13 @@ const drawTrack = (rc: RenderContext, track: Track, camera: { x: number; y: numb
 
   // Edges.
   const edges = trackEdges(track, 1);
-  ctx.strokeStyle = 'rgba(255, 58, 209, 0.55)';
-  ctx.lineWidth = 1.6;
+  ctx.strokeStyle = 'rgba(255, 58, 209, 0.7)';
+  ctx.lineWidth = 2;
   ctx.beginPath();
   edges.left.forEach((p, i) => (i === 0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y)));
   ctx.closePath();
   ctx.stroke();
-  ctx.strokeStyle = 'rgba(58, 255, 225, 0.55)';
+  ctx.strokeStyle = 'rgba(58, 255, 225, 0.7)';
   ctx.beginPath();
   edges.right.forEach((p, i) => (i === 0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y)));
   ctx.closePath();
@@ -172,7 +202,6 @@ const drawTrack = (rc: RenderContext, track: Track, camera: { x: number; y: numb
     ctx.moveTo(a.x + nx * track.halfWidth, a.y + ny * track.halfWidth);
     ctx.lineTo(a.x - nx * track.halfWidth, a.y - ny * track.halfWidth);
     ctx.stroke();
-    // Checker pattern overlay.
     const segments = 10;
     for (let i = 0; i < segments; i++) {
       if (i % 2 === 0) continue;
@@ -187,7 +216,7 @@ const drawTrack = (rc: RenderContext, track: Track, camera: { x: number; y: numb
     }
   }
 
-  // Other checkpoints (subtle).
+  // Other checkpoints (subtle dashed).
   for (let i = 1; i < track.checkpoints.length; i++) {
     const idx = track.checkpoints[i] as number;
     const a = track.centerline[idx] as { x: number; y: number };
@@ -212,24 +241,20 @@ const drawTrack = (rc: RenderContext, track: Track, camera: { x: number; y: numb
 
 const drawShip = (
   rc: RenderContext,
+  cam: Camera,
   ship: { x: number; y: number; h: number; vx: number; vy: number; flags: number },
   player: PlayerInfoMsg | undefined,
   isMe: boolean,
   trail: readonly { x: number; y: number }[],
-  camera: { x: number; y: number; zoom: number },
 ) => {
-  const { ctx, width, height } = rc;
-  const cx = width / 2;
-  const cy = height / 2;
+  const { ctx } = rc;
   const ko = (ship.flags & FLAG_KO) !== 0;
   const sky = (ship.flags & FLAG_SKYWAY) !== 0;
   const boost = (ship.flags & FLAG_FREE_BOOST) !== 0;
   const color = player?.color ?? '#888';
 
   ctx.save();
-  ctx.translate(cx, cy);
-  ctx.scale(camera.zoom, camera.zoom);
-  ctx.translate(-camera.x, -camera.y);
+  applyCamera(ctx, cam);
 
   // Trail.
   if (trail.length > 1) {
@@ -270,7 +295,6 @@ const drawShip = (
   }
   ctx.shadowBlur = 0;
 
-  // Boost/skyway aura.
   if (boost && !ko) {
     ctx.fillStyle = 'rgba(255, 210, 58, 0.4)';
     ctx.beginPath();
@@ -293,11 +317,11 @@ const drawShip = (
 export const renderFrame = (
   rc: RenderContext,
   state: ClientState,
-  trails: TrailCache,
+  rstate: RenderState,
   nowMs: number,
 ): void => {
   const { ctx, width, height } = rc;
-  // Background: subtle starfield gradient.
+  // Background.
   const grad = ctx.createLinearGradient(0, 0, 0, height);
   grad.addColorStop(0, '#0a0420');
   grad.addColorStop(1, '#06010f');
@@ -306,41 +330,67 @@ export const renderFrame = (
 
   const track = findTrack(state.trackId);
   const ships = computeInterpolatedShips(state, nowMs);
-  trails.update(new Map([...ships.entries()].map(([id, s]) => [id, { x: s.x, y: s.y }])));
+  rstate.updateTrails(new Map([...ships.entries()].map(([id, s]) => [id, { x: s.x, y: s.y }])));
 
-  // Camera: follow the local player's interpolated position; otherwise fit the whole track.
   const me = state.myId ? ships.get(state.myId) : undefined;
-  const camera = me
-    ? (() => {
-        const speed = Math.hypot(me.vx, me.vy);
-        const view = VIEW_BASE + speed * VIEW_SPEED_FACTOR;
-        return { x: me.x, y: me.y, zoom: Math.min(width, height) / view };
-      })()
-    : (() => {
-        const bounds = trackBounds(track);
-        const w = bounds.maxX - bounds.minX;
-        const h = bounds.maxY - bounds.minY;
-        const cx = (bounds.maxX + bounds.minX) / 2;
-        const cy = (bounds.maxY + bounds.minY) / 2;
-        return { x: cx, y: cy, zoom: Math.min(width / w, height / h) * 0.85 };
-      })();
+  const cam = me
+    ? buildShipCamera(width, height, me, rstate)
+    : buildOverviewCamera(width, height, track);
 
-  drawTrack(rc, track, camera);
+  drawTrack(rc, track, cam);
 
-  // Draw ships in z-order: KO bottom, others, then me on top.
+  // Draw KO ships first, then alive, then me on top.
   const drawOrder = [...ships.entries()].sort(([, a], [, b]) => {
     const aKo = (a.flags & FLAG_KO) !== 0 ? 0 : 1;
     const bKo = (b.flags & FLAG_KO) !== 0 ? 0 : 1;
-    if (aKo !== bKo) return aKo - bKo;
-    return 0;
+    return aKo - bKo;
   });
   for (const [id, s] of drawOrder) {
     if (id === state.myId) continue;
-    drawShip(rc, s, state.players[id], false, trails.get(id), camera);
+    drawShip(rc, cam, s, state.players[id], false, rstate.trail(id));
   }
   if (me && state.myId) {
-    drawShip(rc, me, state.players[state.myId], true, trails.get(state.myId), camera);
+    drawShip(rc, cam, me, state.players[state.myId], true, rstate.trail(state.myId));
   }
+};
+
+const buildShipCamera = (
+  width: number,
+  height: number,
+  ship: { x: number; y: number; h: number; vx: number; vy: number },
+  rstate: RenderState,
+): Camera => {
+  const speed = Math.hypot(ship.vx, ship.vy);
+  const view = VIEW_BASE + speed * VIEW_SPEED_FACTOR;
+  const minDim = Math.min(width, height);
+  const zoom = minDim / view;
+  // Rotate the world so the ship's heading points to screen up (-PI/2 in canvas y-down).
+  const targetRotation = -ship.h - Math.PI / 2;
+  const rotation = rstate.smoothRotation(targetRotation);
+  return {
+    worldX: ship.x,
+    worldY: ship.y,
+    zoom,
+    rotation,
+    anchorX: width / 2,
+    anchorY: height * ANCHOR_Y_FRAC,
+  };
+};
+
+const buildOverviewCamera = (width: number, height: number, track: Track): Camera => {
+  const bounds = trackBounds(track);
+  const w = bounds.maxX - bounds.minX;
+  const h = bounds.maxY - bounds.minY;
+  const cx = (bounds.maxX + bounds.minX) / 2;
+  const cy = (bounds.maxY + bounds.minY) / 2;
+  return {
+    worldX: cx,
+    worldY: cy,
+    zoom: Math.min(width / w, height / h) * 0.85,
+    rotation: 0,
+    anchorX: width / 2,
+    anchorY: height / 2,
+  };
 };
 
 export const renderMinimap = (
@@ -359,7 +409,6 @@ export const renderMinimap = (
   const s = Math.min(sx, sy);
   const ox = (width - w * s) / 2 - bounds.minX * s;
   const oy = (height - h * s) / 2 - bounds.minY * s;
-  // Track outline.
   ctx.strokeStyle = 'rgba(255,255,255,0.35)';
   ctx.lineWidth = 1.5;
   ctx.beginPath();
@@ -371,7 +420,6 @@ export const renderMinimap = (
     else ctx.lineTo(xx, yy);
   }
   ctx.stroke();
-  // Ships.
   const last = state.snapshots[state.snapshots.length - 1];
   if (!last) return;
   for (const ship of last.ships) {
@@ -404,3 +452,4 @@ const trackBounds = (track: Track): { minX: number; maxX: number; minY: number; 
   const pad = track.halfWidth + 8;
   return { minX: minX - pad, maxX: maxX + pad, minY: minY - pad, maxY: maxY + pad };
 };
+
