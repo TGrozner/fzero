@@ -212,7 +212,12 @@ export class RoomCore {
         }
       }
     } else if (this.phase === 'COUNTDOWN') {
+      const before = Math.ceil(this.countdown);
       this.countdown = Math.max(0, this.countdown - dt);
+      const after = Math.ceil(this.countdown);
+      if (after !== before && this.countdown > 0) {
+        events.push({ type: 'phase', phase: 'COUNTDOWN', countdown: this.countdown });
+      }
       if (this.countdown === 0) {
         this.phase = 'RACING';
         events.push({ type: 'phase', phase: 'RACING' });

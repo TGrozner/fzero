@@ -28,15 +28,17 @@ const empty = (): KeyState => ({
   menu: false,
 });
 
+// WASD = steer/accel/brake, Q/E = side attacks, Enter = spin, Shift = boost,
+// Space = skyway, P = pause, Esc = menu.
 const KEY_MAP: Record<string, keyof KeyState> = {
   ArrowUp: 'up',
   KeyW: 'up',
   ArrowDown: 'down',
   KeyS: 'down',
   ArrowLeft: 'left',
-  KeyD: 'right',
+  KeyA: 'left',
   ArrowRight: 'right',
-  KeyA: 'sideLeft',
+  KeyD: 'right',
   KeyQ: 'sideLeft',
   KeyE: 'sideRight',
   ShiftLeft: 'boost',
@@ -47,17 +49,7 @@ const KEY_MAP: Record<string, keyof KeyState> = {
   Escape: 'menu',
 };
 
-// Note: ArrowLeft maps to 'left'; we set it explicitly here so KeyA and KeyD don't
-// collide with steering shortcuts. In practice we use:
-// - WASD or arrows for steer/accel/brake
-// - Q / E (or A) for side attacks
-// We'll bind ArrowLeft → 'left' in addition to KeyA-as-sideLeft.
-
-const KEY_MAP_2: Record<string, keyof KeyState> = {
-  ArrowLeft: 'left',
-};
-
-const buildMap = (): Record<string, keyof KeyState> => ({ ...KEY_MAP, ...KEY_MAP_2 });
+const buildMap = (): Record<string, keyof KeyState> => KEY_MAP;
 
 /** Read keyboard state via a ref. The hook returns a getter for the current snapshot. */
 export const useKeyboard = (
