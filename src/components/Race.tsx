@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { type ClientState, type Action, findMyShip } from '../state.ts';
+import { type ClientState, type Action, findMyShip, spectatorTargetId } from '../state.ts';
 import { useGameLoop } from '../hooks/useGameLoop.ts';
 import { useKeyboard, keyboardToInput } from '../hooks/useKeyboard.ts';
 import { HUD } from './HUD.tsx';
@@ -48,6 +48,7 @@ export function Race({ state, dispatch, socket, onLeave }: Props) {
       } else if (e.code === 'KeyQ' || e.code === 'KeyE') {
         const dir: -1 | 1 = e.code === 'KeyQ' ? -1 : 1;
         setSideRing(dir);
+        renderRef.current.triggerLocalSide(performance.now(), dir);
         if (sideTimer) clearTimeout(sideTimer);
         sideTimer = window.setTimeout(() => setSideRing(null), 320);
       }
@@ -156,7 +157,15 @@ export function Race({ state, dispatch, socket, onLeave }: Props) {
         <div className="spectator-overlay" data-testid="spectator">
           <div className="panel">
             <h3>KO'd</h3>
-            <p>You're out — watching until the race ends.</p>
+            <p>
+              {(() => {
+                const id = spectatorTargetId(state);
+                const name = id ? state.players[id]?.name ?? id : null;
+                return name
+                  ? `Spectating ${name} until the race ends.`
+                  : "You're out — watching until the race ends.";
+              })()}
+            </p>
             <button onClick={onLeave}>Leave</button>
           </div>
         </div>

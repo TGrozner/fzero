@@ -145,6 +145,33 @@ describe('RoomCore lifecycle', () => {
     expect(r.phase).toBe('FINISHED');
   });
 
+  it('lets a disconnected client reclaim its vehicle via session token', () => {
+    const r = new RoomCore();
+    const { id: pid } = r.addHuman('c1', 'Tom', '#3aa0ff', 'sess-1');
+    r.startRace();
+    while (r.phase !== 'RACING') r.step(1 / 30);
+    // Disconnect — entry stays as a bot.
+    r.removeHuman('c1');
+    const stale = r.players.get(pid);
+    expect(stale?.bot).toBe(true);
+    expect(stale?.session).toBe('sess-1');
+    // Reconnect with a different connId but same session token.
+    const result = r.addHuman('c2', 'Tom', '#3aa0ff', 'sess-1');
+    expect(result.id).toBe(pid);
+    expect(result.reconnected).toBe(true);
+    const reclaimed = r.players.get(pid);
+    expect(reclaimed?.bot).toBe(false);
+    expect(reclaimed?.connId).toBe('c2');
+  });
+
+  it('refuses a fresh join mid-race even with a session, if no slot matches', () => {
+    const r = new RoomCore();
+    r.addHuman('c1', 'A', '#3aa0ff', 'sess-A');
+    r.startRace();
+    while (r.phase !== 'RACING') r.step(1 / 30);
+    expect(() => r.addHuman('c9', 'B', '#ff4040', 'sess-NEW')).toThrow();
+  });
+
   it('auto-abandons immediately when last human leaves mid-race', () => {
     const r = new RoomCore('mute-avenue', undefined, 0.5);
     r.addHuman('c1', 'A', '#3aa0ff');

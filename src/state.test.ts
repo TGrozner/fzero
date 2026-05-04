@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { reducer, buildInitialClientState, findMyShip, myPosition } from './state.ts';
+import { reducer, buildInitialClientState, findMyShip, myPosition, spectatorTargetId } from './state.ts';
 
 const baseState = () => buildInitialClientState();
 
@@ -194,5 +194,32 @@ describe('selectors', () => {
 
   it('myPosition returns null when no snapshot', () => {
     expect(myPosition(baseState())).toBeNull();
+  });
+
+  it('spectatorTargetId returns the alive ship with the highest arc length', () => {
+    const s = stateWithSnapshot();
+    expect(spectatorTargetId(s)).toBe('p2'); // higher arcLength
+  });
+
+  it('spectatorTargetId skips KO ships', () => {
+    const s = {
+      ...baseState(),
+      myId: 'p1',
+      snapshots: [
+        {
+          tick: 1,
+          time: 1,
+          receivedAt: 0,
+          racersLeft: 2,
+          pk: 0,
+          ships: [
+            // p2 has higher arc but is KO
+            { id: 'p2', x: 0, y: 0, h: 0, vx: 0, vy: 0, p: 0, k: 0, l: 0, a: 200, f: 4 },
+            { id: 'p3', x: 0, y: 0, h: 0, vx: 0, vy: 0, p: 1, k: 0, l: 0, a: 100, f: 0 },
+          ],
+        },
+      ],
+    };
+    expect(spectatorTargetId(s)).toBe('p3');
   });
 });

@@ -6,13 +6,23 @@ type Props = {
   pseudo: string;
   color: string;
   trackId: string;
+  roomName: string;
   onTrackChange: (id: string) => void;
   onStart: () => void;
   dispatch: (a: Action) => void;
   busy: boolean;
 };
 
-export function Menu({ pseudo, color, trackId, onTrackChange, onStart, dispatch, busy }: Props) {
+export function Menu({
+  pseudo,
+  color,
+  trackId,
+  roomName,
+  onTrackChange,
+  onStart,
+  dispatch,
+  busy,
+}: Props) {
   const canStart = pseudo.trim().length >= 1 && !busy;
   return (
     <div className="menu" data-testid="menu">
@@ -67,6 +77,23 @@ export function Menu({ pseudo, color, trackId, onTrackChange, onStart, dispatch,
             </option>
           ))}
         </select>
+      </div>
+      <div className="row" style={{ flexDirection: 'column', alignItems: 'stretch', gap: 4 }}>
+        <label htmlFor="room">Room (optional)</label>
+        <input
+          id="room"
+          data-testid="room-input"
+          type="text"
+          maxLength={24}
+          value={roomName}
+          onChange={(e) =>
+            dispatch({
+              type: 'SET_ROOM',
+              roomName: e.target.value.replace(/[^A-Za-z0-9_-]/g, ''),
+            })
+          }
+          placeholder="Leave blank for global lobby"
+        />
       </div>
       <button
         data-testid="race-button"

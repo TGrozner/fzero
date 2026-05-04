@@ -153,6 +153,8 @@ export class RenderState {
   private lastFrameMs: number | null = null;
   /** Performance.now() at which the local player triggered a spin attack. */
   private localSpinAt: number | null = null;
+  /** Performance.now() at which the local player triggered a side attack + direction. */
+  private localSideAt: { at: number; dir: -1 | 1 } | null = null;
   /** Highest `at` of pickup events already consumed for impact bursts. */
   private lastPickupBurstAt = 0;
   /** True when this RenderState has consumed a pickup event with this exact `at`. */
@@ -173,6 +175,19 @@ export class RenderState {
     const t = (nowMs - this.localSpinAt) / durationMs;
     if (t < 0 || t > 1) return null;
     return t;
+  }
+
+  /** Mark a local side-attack event with its direction (-1 left, +1 right). */
+  triggerLocalSide(nowMs: number, dir: -1 | 1): void {
+    this.localSideAt = { at: nowMs, dir };
+  }
+
+  /** Returns the active local side-attack record, or null if inactive. */
+  localSideActive(nowMs: number, durationMs: number): { dir: -1 | 1; t: number } | null {
+    if (!this.localSideAt) return null;
+    const t = (nowMs - this.localSideAt.at) / durationMs;
+    if (t < 0 || t > 1) return null;
+    return { dir: this.localSideAt.dir, t };
   }
 
   updateTrails(ships: Map<string, { x: number; y: number }>) {
@@ -510,26 +525,23 @@ const drawSky = (
     ctx.fill();
   }
 
-  // Distant skyline silhouette (a few jagged pillars near the horizon).
-  ctx.fillStyle = 'rgba(60, 20, 88, 0.85)';
-  let s = 4242;
-  const rng = () => {
-    s = (s * 1103515245 + 12345) & 0x7fffffff;
-    return s / 0x7fffffff;
-  };
-  ctx.beginPath();
-  ctx.moveTo(0, horizonY);
-  let x = 0;
-  while (x < width) {
-    const w = 18 + rng() * 40;
-    const h = 6 + rng() * 38;
-    ctx.lineTo(x, horizonY - h);
-    ctx.lineTo(x + w, horizonY - h);
-    x += w;
-  }
-  ctx.lineTo(width, horizonY);
-  ctx.closePath();
-  ctx.fill();
+  // Background mountains: 2 parallax layers — far slow, near fast — both keyed
+  // off camera heading so panning the camera shifts them at different rates.
+  // Far layer: deep purple, scrolls slowly.
+  drawSkylineLayer(ctx, width, horizonY, headingShift * 0.18, 1717, {
+    fill: 'rgba(40, 14, 70, 0.85)',
+    minH: 18,
+    maxH: 60,
+    bandTop: horizonY - 60,
+  });
+  // Near layer: brighter magenta, scrolls faster — sits in front of the far
+  // layer at the horizon.
+  drawSkylineLayer(ctx, width, horizonY, headingShift * 0.45, 4242, {
+    fill: 'rgba(80, 28, 110, 0.88)',
+    minH: 6,
+    maxH: 38,
+    bandTop: horizonY - 38,
+  });
 
   // Horizon glow line.
   const horizonGlow = ctx.createLinearGradient(0, horizonY - 6, 0, horizonY + 6);
@@ -546,6 +558,56 @@ const drawSky = (
   ground.addColorStop(1, '#03000d');
   ctx.fillStyle = ground;
   ctx.fillRect(0, horizonY, width, height - horizonY);
+};
+
+/**
+ * Draw a parallax skyline strip with deterministic jagged pillars. The pattern
+ * tiles horizontally and shifts by `scroll` pixels so different layers can move
+ * at different rates relative to the camera heading.
+ */
+const drawSkylineLayer = (
+  ctx: CanvasRenderingContext2D,
+  width: number,
+  horizonY: number,
+  scroll: number,
+  seed: number,
+  opts: { fill: string; minH: number; maxH: number; bandTop: number },
+): void => {
+  let s = seed;
+  const rng = () => {
+    s = (s * 1103515245 + 12345) & 0x7fffffff;
+    return s / 0x7fffffff;
+  };
+  // Build one tile of width = ~width then draw it twice for seamless wrap.
+  type Pillar = { w: number; h: number };
+  const pillars: Pillar[] = [];
+  let acc = 0;
+  while (acc < width * 1.4) {
+    const w = 18 + rng() * 40;
+    const h = opts.minH + rng() * (opts.maxH - opts.minH);
+    pillars.push({ w, h });
+    acc += w;
+  }
+  const tileW = acc;
+  const offset = ((scroll % tileW) + tileW) % tileW;
+  ctx.fillStyle = opts.fill;
+  ctx.beginPath();
+  ctx.moveTo(-offset, horizonY);
+  let x = -offset;
+  // Repeat the tile twice so the pattern always covers width.
+  for (let rep = 0; rep < 2; rep++) {
+    for (const p of pillars) {
+      ctx.lineTo(x, horizonY - p.h);
+      ctx.lineTo(x + p.w, horizonY - p.h);
+      x += p.w;
+      if (x > width + offset) break;
+    }
+    if (x > width + offset) break;
+  }
+  ctx.lineTo(x, horizonY);
+  ctx.closePath();
+  ctx.fill();
+  void opts.bandTop; // reserved for potential future band-clipping
 };
 
 /** Draw an infinite synthwave grid on the ground plane. */
@@ -926,13 +988,38 @@ export const renderFrame = (
   const ships = computeInterpolatedShips(state, nowMs);
   rstate.updateTrails(new Map([...ships.entries()].map(([id, s]) => [id, { x: s.x, y: s.y }])));
 
-  const me = state.myId ? ships.get(state.myId) : undefined;
+  const localShip = state.myId ? ships.get(state.myId) : undefined;
+  const localKo = localShip ? (localShip.flags & FLAG_KO) !== 0 : false;
+  // When the local player is KO'd or hasn't been placed yet, switch the camera
+  // to spectate the leader. Find the leader by highest arcLength among the
+  // alive ships in the latest snapshot.
+  let me = localShip;
+  let spectating: string | null = null;
+  if (!me || localKo) {
+    const last = state.snapshots[state.snapshots.length - 1];
+    if (last) {
+      let bestId: string | null = null;
+      let bestArc = -Infinity;
+      for (const s of last.ships) {
+        if ((s.f & FLAG_KO) !== 0) continue;
+        if (s.a > bestArc) {
+          bestArc = s.a;
+          bestId = s.id;
+        }
+      }
+      if (bestId) {
+        me = ships.get(bestId);
+        if (bestId !== state.myId) spectating = bestId;
+      }
+    }
+  }
   if (!me) {
     // Reset the per-frame timer so the first in-race frame doesn't see a giant dt.
     rstate.consumeDt(nowMs);
     drawOverview(rc, track, state, ships);
     return;
   }
+  void spectating; // surfaced via the UI overlay separately
 
   // Per-frame dt up front so all smoothing is dt-aware.
   const dtSec = rstate.consumeDt(nowMs) / 1000;
@@ -1005,13 +1092,32 @@ export const renderFrame = (
   }
   rstate.stepParticles(dtSec);
 
+  drawTrails(rc, rstate, ships, state, cam, cfg);
+
   drawParticles(rc, rstate, cam, cfg);
 
   // Local spin attack: rotate the player's ship a full turn over the spin
   // duration so the strike actually reads as a spin rather than a flash.
   const SPIN_VIS_MS = 420;
+  const SIDE_VIS_MS = 320;
   const localSpinT = rstate.localSpinProgress(nowMs, SPIN_VIS_MS);
   const localSpinAngle = localSpinT !== null ? localSpinT * Math.PI * 2 : 0;
+  // Spawn one burst at the spin start (t small) and at side-attack start.
+  if (localSpinT !== null && localSpinT < 0.05) {
+    rstate.spawnImpactBurst(me.x, me.y, 'spin', 14);
+  }
+  const sideActive = rstate.localSideActive(nowMs, SIDE_VIS_MS);
+  if (sideActive && sideActive.t < 0.08) {
+    // Offset the burst to the attacked side (perpendicular to heading).
+    const px = me.x - Math.sin(me.h) * sideActive.dir * 6;
+    const py = me.y + Math.cos(me.h) * sideActive.dir * 6;
+    rstate.spawnImpactBurst(
+      px,
+      py,
+      sideActive.dir === -1 ? 'side-left' : 'side-right',
+      10,
+    );
+  }
 
   const projected = [...ships.entries()].map(([id, s]) => {
     const p = project(s.x, s.y, cam, cfg, width);
@@ -1136,6 +1242,54 @@ const drawPickups = (
     ctx.fillText(glyph, proj.sx, proj.sy + 1);
     ctx.restore();
   }
+};
+
+/**
+ * Draw a fading neon trail behind every ship. Trails are stored as the last
+ * N world positions (see RenderState.updateTrails); each segment is drawn
+ * with alpha proportional to its age in the trail.
+ */
+const drawTrails = (
+  rc: RenderContext,
+  rstate: RenderState,
+  ships: Map<string, { x: number; y: number; flags: number }>,
+  state: ClientState,
+  cam: CamPose,
+  cfg: CamConfig,
+): void => {
+  const { ctx, width } = rc;
+  ctx.save();
+  ctx.lineCap = 'round';
+  for (const [id, s] of ships) {
+    const ko = (s.flags & FLAG_KO) !== 0;
+    if (ko) continue;
+    const trail = rstate.trail(id);
+    if (trail.length < 2) continue;
+    const color = state.players[id]?.color ?? '#888';
+    for (let i = 1; i < trail.length; i++) {
+      const a = trail[i - 1] as { x: number; y: number };
+      const b = trail[i] as { x: number; y: number };
+      const pa = project(a.x, a.y, cam, cfg, width);
+      const pb = project(b.x, b.y, cam, cfg, width);
+      if (!pa.visible || !pb.visible) continue;
+      const ageNorm = i / trail.length; // newest = ~1, oldest = ~1/N
+      const fa = fogAlpha(Math.min(pa.depth, pb.depth));
+      const alpha = ageNorm * fa * 0.55;
+      if (alpha <= 0.02) continue;
+      ctx.strokeStyle = color;
+      ctx.globalAlpha = alpha;
+      ctx.shadowColor = color;
+      ctx.shadowBlur = 6 * ageNorm;
+      ctx.lineWidth = Math.max(1, 3 * ageNorm * (1 - Math.min(0.85, pa.depth / 220)));
+      ctx.beginPath();
+      ctx.moveTo(pa.sx, pa.sy);
+      ctx.lineTo(pb.sx, pb.sy);
+      ctx.stroke();
+    }
+  }
+  ctx.shadowBlur = 0;
+  ctx.globalAlpha = 1;
+  ctx.restore();
 };
 
 const drawParticles = (

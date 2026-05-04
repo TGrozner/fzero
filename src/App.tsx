@@ -8,18 +8,24 @@ import { useGameSocket } from './hooks/useGameSocket.ts';
 
 const STORAGE_KEY = 'fzero99:profile';
 
-const loadProfile = (): { pseudo: string; color: string; trackId: string } => {
+const loadProfile = (): { pseudo: string; color: string; trackId: string; roomName: string } => {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return { pseudo: '', color: '#3aa0ff', trackId: 'mute-avenue' };
-    const obj = JSON.parse(raw) as { pseudo?: string; color?: string; trackId?: string };
+    if (!raw) return { pseudo: '', color: '#3aa0ff', trackId: 'mute-avenue', roomName: '' };
+    const obj = JSON.parse(raw) as {
+      pseudo?: string;
+      color?: string;
+      trackId?: string;
+      roomName?: string;
+    };
     return {
       pseudo: obj.pseudo ?? '',
       color: obj.color ?? '#3aa0ff',
       trackId: obj.trackId ?? 'mute-avenue',
+      roomName: obj.roomName ?? '',
     };
   } catch {
-    return { pseudo: '', color: '#3aa0ff', trackId: 'mute-avenue' };
+    return { pseudo: '', color: '#3aa0ff', trackId: 'mute-avenue', roomName: '' };
   }
 };
 
@@ -30,16 +36,23 @@ export function App() {
     pseudo: profile.pseudo,
     color: profile.color,
     trackId: profile.trackId,
+    roomName: profile.roomName,
   }));
   const [connectRequested, setConnectRequested] = useState(false);
 
-  const persist = useCallback((pseudo: string, color: string, trackId: string) => {
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify({ pseudo, color, trackId }));
-    } catch {
-      // ignore
-    }
-  }, []);
+  const persist = useCallback(
+    (pseudo: string, color: string, trackId: string, roomName: string) => {
+      try {
+        localStorage.setItem(
+          STORAGE_KEY,
+          JSON.stringify({ pseudo, color, trackId, roomName }),
+        );
+      } catch {
+        // ignore
+      }
+    },
+    [],
+  );
 
   const socket = useGameSocket(
     dispatch,
@@ -47,12 +60,13 @@ export function App() {
     state.trackId,
     state.pseudo,
     state.color,
+    state.roomName,
   );
 
   const handleStart = useCallback(() => {
-    persist(state.pseudo, state.color, state.trackId);
+    persist(state.pseudo, state.color, state.trackId, state.roomName);
     setConnectRequested(true);
-  }, [persist, state.pseudo, state.color, state.trackId]);
+  }, [persist, state.pseudo, state.color, state.trackId, state.roomName]);
 
   const handleLeave = useCallback(() => {
     setConnectRequested(false);
@@ -76,6 +90,7 @@ export function App() {
           pseudo={state.pseudo}
           color={state.color}
           trackId={state.trackId}
+          roomName={state.roomName}
           onTrackChange={(id) => dispatch({ type: 'SET_TRACK', trackId: id })}
           onStart={handleStart}
           dispatch={dispatch}

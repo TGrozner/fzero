@@ -12,6 +12,7 @@ describe('Menu', () => {
         pseudo=""
         color="#3aa0ff"
         trackId="mute-avenue"
+        roomName=""
         onTrackChange={() => {}}
         onStart={onStart}
         dispatch={dispatch}
@@ -29,6 +30,7 @@ describe('Menu', () => {
         pseudo=""
         color="#3aa0ff"
         trackId="mute-avenue"
+        roomName=""
         onTrackChange={() => {}}
         onStart={() => {}}
         dispatch={dispatch}
@@ -46,6 +48,7 @@ describe('Menu', () => {
         pseudo="Tom"
         color="#3aa0ff"
         trackId="mute-avenue"
+        roomName=""
         onTrackChange={() => {}}
         onStart={() => {}}
         dispatch={dispatch}
@@ -64,6 +67,7 @@ describe('Menu', () => {
         pseudo="Tom"
         color="#3aa0ff"
         trackId="mute-avenue"
+        roomName=""
         onTrackChange={() => {}}
         onStart={onStart}
         dispatch={() => {}}

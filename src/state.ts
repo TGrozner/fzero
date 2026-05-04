@@ -36,6 +36,8 @@ export type ClientState = {
   /** Server-assigned id for this client. */
   myId: string | null;
   trackId: string;
+  /** Optional room name (matchmaking key). Empty = lobby/default. */
+  roomName: string;
   phase: RoomPhase;
   countdown: number;
   startsIn: number;
@@ -63,6 +65,7 @@ export const buildInitialClientState = (): ClientState => ({
   color: '#3aa0ff',
   myId: null,
   trackId: 'mute-avenue',
+  roomName: '',
   phase: 'WAITING',
   countdown: 0,
   startsIn: -1,
@@ -81,6 +84,7 @@ export type Action =
   | { type: 'SET_PSEUDO'; pseudo: string }
   | { type: 'SET_COLOR'; color: string }
   | { type: 'SET_TRACK'; trackId: string }
+  | { type: 'SET_ROOM'; roomName: string }
   | { type: 'CONNECTING' }
   | { type: 'CONNECTED' }
   | { type: 'DISCONNECTED' }
@@ -100,6 +104,8 @@ export const reducer = (state: ClientState, action: Action): ClientState => {
       return { ...state, color: action.color };
     case 'SET_TRACK':
       return { ...state, trackId: action.trackId };
+    case 'SET_ROOM':
+      return { ...state, roomName: action.roomName };
     case 'CONNECTING':
       return { ...state, status: 'connecting', error: null };
     case 'CONNECTED':
@@ -224,4 +230,20 @@ export const myPosition = (state: ClientState): number | null => {
   const sorted = [...last.ships].sort((a, b) => b.a - a.a);
   const idx = sorted.findIndex((s) => s.id === state.myId);
   return idx >= 0 ? idx + 1 : null;
+};
+
+/** Find the id of the ship the spectator camera should follow (alive leader). */
+export const spectatorTargetId = (state: ClientState): string | null => {
+  const last = state.snapshots[state.snapshots.length - 1];
+  if (!last) return null;
+  let bestId: string | null = null;
+  let bestArc = -Infinity;
+  for (const s of last.ships) {
+    if ((s.f & 4) !== 0) continue; // FLAG_KO
+    if (s.a > bestArc) {
+      bestArc = s.a;
+      bestId = s.id;
+    }
+  }
+  return bestId;
 };

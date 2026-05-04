@@ -42,10 +42,16 @@ import {
 
 export type PlayerEntry = {
   readonly id: string;
-  readonly connId: string | null; // null = bot
+  readonly connId: string | null; // null = bot or disconnected
   readonly name: string;
   readonly color: string;
   readonly bot: boolean;
+  /**
+   * Stable per-client session token. When a connection drops mid-race the
+   * entry is converted to a bot but `session` is preserved so the same
+   * client can reclaim its vehicle by sending the same token in `hello`.
+   */
+  readonly session: string | null;
 };
 
 export type StepResult = {
@@ -131,8 +137,43 @@ export class RoomCore {
     return mask;
   }
 
-  /** Add a human player. Returns the assigned player id and welcome message. */
-  addHuman(connId: string, name: string, color: string): { id: string; welcome: ServerMessage } {
+  /**
+   * Add a human player. Returns the assigned player id and welcome message.
+   * If `session` matches an existing entry that's currently bot-controlled
+   * (i.e. the client previously disconnected), reclaims that entry instead
+   * of allocating a new one — even mid-race.
+   */
+  addHuman(
+    connId: string,
+    name: string,
+    color: string,
+    session: string | null = null,
+  ): { id: string; welcome: ServerMessage; reconnected: boolean } {
+    // Reconnection path: same session token, currently bot-piloted.
+    if (session) {
+      for (const [pid, entry] of this.players) {
+        if (entry.session === session && entry.bot) {
+          this.players.set(pid, { ...entry, connId, bot: false });
+          // Resume normal input processing for this vehicle.
+          if (!this.inputs.has(pid)) this.inputs.set(pid, NEUTRAL_INPUT);
+          this.lastHumanInputAt = this.raceTime;
+          return {
+            id: pid,
+            reconnected: true,
+            welcome: {
+              type: 'welcome',
+              yourId: pid,
+              track: this.track.id,
+              players: this.playerInfos(),
+              phase: this.phase,
+              countdown: this.countdown,
+              startsIn: this.startsIn,
+              reconnected: true,
+            },
+          };
+        }
+      }
+    }
     if (this.players.size >= MAX_RACERS) {
       throw new Error('room full');
     }
@@ -142,7 +183,14 @@ export class RoomCore {
     const id = nextId('p');
     const safeName = sanitizeName(name) || `Pilot ${this.players.size + 1}`;
     const safeColor = SHIP_COLORS.includes(color) ? color : (SHIP_COLORS[0] as string);
-    this.players.set(id, { id, connId, name: safeName, color: safeColor, bot: false });
+    this.players.set(id, {
+      id,
+      connId,
+      name: safeName,
+      color: safeColor,
+      bot: false,
+      session,
+    });
     // Lobby auto-start: long timer when the first human shows up; shorten when a 2nd arrives.
     const humans = [...this.players.values()].filter((p) => !p.bot).length;
     if (humans === 1 && this.startsIn < 0) {
@@ -155,6 +203,7 @@ export class RoomCore {
     }
     return {
       id,
+      reconnected: false,
       welcome: {
         type: 'welcome',
         yourId: id,
@@ -178,6 +227,8 @@ export class RoomCore {
           this.inputs.delete(pid);
         } else {
           // Mid-race: convert to a bot so the race continues without them.
+          // `session` is preserved so the same client can reconnect and
+          // reclaim this vehicle.
           this.players.set(pid, { ...entry, connId: null, bot: true });
         }
       }
@@ -207,6 +258,7 @@ export class RoomCore {
         name: botName(id),
         color: botColor(id, SHIP_COLORS),
         bot: true,
+        session: null,
       });
     }
     // Spawn vehicles.

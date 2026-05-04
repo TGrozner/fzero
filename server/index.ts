@@ -100,7 +100,18 @@ export class Room {
         }
       }
     }
-    if (this.core.players.size >= 99 || this.core.phase !== 'WAITING') {
+    // Allow upgrades during RACING/COUNTDOWN if the client has a known
+    // session token: they may be reconnecting to claim back their bot.
+    const session = url.searchParams.get('session');
+    const isReconnect =
+      session !== null &&
+      this.core.phase !== 'WAITING' &&
+      this.core.phase !== 'FINISHED' &&
+      [...this.core.players.values()].some((p) => p.session === session && p.bot);
+    if (
+      !isReconnect &&
+      (this.core.players.size >= 99 || this.core.phase !== 'WAITING')
+    ) {
       return new Response('room full or already started', {
         status: 409,
         headers: CORS_HEADERS,
@@ -126,11 +137,29 @@ export class Room {
     }
     if (msg.type === 'hello') {
       try {
-        const { id, welcome } = this.core.addHuman(att.connId, msg.name, msg.color);
+        const { id, welcome } = this.core.addHuman(
+          att.connId,
+          msg.name,
+          msg.color,
+          msg.session ?? null,
+        );
         // Replace attachment connId with playerId for fast input lookup.
         ws.serializeAttachment({ connId: att.connId } satisfies ConnAttachment);
         ws.send(encode(welcome));
         this.broadcastExcept(ws, { type: 'players', players: this.core.playerInfos() });
+        // Re-send a snapshot so the reconnecting client can render immediately.
+        if (this.core.phase === 'RACING' || this.core.phase === 'COUNTDOWN') {
+          ws.send(
+            encode({
+              type: 'snapshot',
+              tick: this.core.tick,
+              time: this.core.raceTime,
+              ships: this.core.snapshotShips(),
+              racersLeft: [...this.core.vehicles.values()].filter((v) => !v.ko && !v.finished).length,
+              pk: this.core.pickupActiveMask(),
+            }),
+          );
+        }
         this.ensureAlarmScheduled();
         void id;
       } catch (e) {

@@ -41,7 +41,7 @@ export type PlayerInfoMsg = {
 
 /** Client → Server messages. */
 export type ClientMessage =
-  | { type: 'hello'; name: string; color: string }
+  | { type: 'hello'; name: string; color: string; session?: string }
   | { type: 'input'; ts: number; in: InputBits }
   | { type: 'ping'; ts: number };
 
@@ -71,6 +71,11 @@ export type ServerMessage =
       phase: RoomPhase;
       countdown: number;
       startsIn: number; // seconds until auto-start (lobby), -1 if N/A
+      /**
+       * True if this welcome message is for a reconnecting client (their
+       * previous bot-controlled vehicle is being handed back).
+       */
+      reconnected?: boolean;
     }
   | { type: 'players'; players: PlayerInfoMsg[] }
   | {
