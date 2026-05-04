@@ -1190,37 +1190,10 @@ const drawSpeedFx = (
     ctx.fillRect(0, 0, width, height);
   }
 
-  // Radial speed streaks emanating from the vanishing point. We use a low
-  // streak count + per-frame jitter (rather than a persistent particle
-  // system) because the eye reads the radial motion, not individual lines.
-  if (speedNorm < 0.18) return;
-  const cx = width / 2;
-  const cy = horizonY;
-  const count = Math.floor(14 + speedNorm * 26);
-  ctx.strokeStyle = `rgba(255, 255, 255, ${0.18 + speedNorm * 0.32})`;
-  ctx.lineWidth = 1.2;
-  ctx.lineCap = 'round';
-  for (let i = 0; i < count; i++) {
-    // Pseudo-random angle, tied to streak index, slowly rotating.
-    const a = (i * 2.399963 + nowMs * 0.0008 * (0.6 + speedNorm)) % (Math.PI * 2);
-    const phase = (nowMs * (0.6 + speedNorm * 1.4) + i * 173) % 720;
-    const r0 = 80 + phase;
-    const r1 = r0 + 40 + speedNorm * 80;
-    const cosA = Math.cos(a);
-    const sinA = Math.sin(a);
-    const x0 = cx + cosA * r0;
-    const y0 = cy + sinA * r0;
-    const x1 = cx + cosA * r1;
-    const y1 = cy + sinA * r1;
-    // Skip streaks that fall above the horizon (no point streaking the sky).
-    if (y0 < horizonY - 12 && y1 < horizonY - 12) continue;
-    if ((x0 < -20 && x1 < -20) || (x0 > width + 20 && x1 > width + 20)) continue;
-    if (y0 > height + 20 && y1 > height + 20) continue;
-    ctx.beginPath();
-    ctx.moveTo(x0, y0);
-    ctx.lineTo(x1, y1);
-    ctx.stroke();
-  }
+  void nowMs;
+  // The radial "speed streaks" overlay was removed: regenerating ~30 lines
+  // per frame at random angles produced obvious flicker. The vignette above
+  // already conveys the speed feel; we leave it as the sole at-speed cue.
 };
 
 /**
