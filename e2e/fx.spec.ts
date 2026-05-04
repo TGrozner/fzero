@@ -117,6 +117,30 @@ test('lobby copy-invite button copies a room URL', async ({ page, browser, conte
   void browser;
 });
 
+test('menu shows track personal-best placeholder when none recorded', async ({ page }) => {
+  await page.goto('/');
+  // localStorage starts empty; the PB row reads "No PB yet".
+  await expect(page.getByTestId('track-pb')).toContainText('No PB yet');
+});
+
+test('menu has an animated backdrop canvas behind the form', async ({ page }) => {
+  await page.goto('/');
+  await expect(page.getByTestId('menu-backdrop')).toBeVisible();
+});
+
+test('in-race pause menu exposes volume slider and music toggle', async ({ page }) => {
+  await enterRace(page, 'pause-menu');
+  await page.waitForTimeout(5500);
+  // Open the pause menu with P.
+  await page.locator('canvas').first().click();
+  await page.keyboard.press('KeyP');
+  await expect(page.getByTestId('pause')).toBeVisible();
+  await expect(page.getByTestId('pause-volume')).toBeVisible();
+  await expect(page.getByTestId('pause-music')).toBeVisible();
+  await expect(page.getByTestId('pause-resume')).toBeVisible();
+  await expect(page.getByTestId('pause-leave')).toBeVisible();
+});
+
 test('lap fanfare overlay surfaces when the local player completes a lap', async ({ page }) => {
   await enterRace(page, 'lap-fanfare');
   // Drive forward to actually progress through laps. With server speed

@@ -190,6 +190,52 @@ describe('reducer', () => {
     expect(reducer(s, { type: 'TOGGLE_PAUSE' }).paused).toBe(false);
   });
 
+  it('SERVER_MESSAGE ko on the local player arms the death cam', () => {
+    let s = reducer(baseState(), {
+      type: 'SERVER_MESSAGE',
+      receivedAt: 1000,
+      message: {
+        type: 'welcome',
+        yourId: 'me',
+        track: 'mute-avenue',
+        phase: 'RACING',
+        countdown: 0,
+        startsIn: -1,
+        players: [],
+      },
+    });
+    s = reducer(s, {
+      type: 'SERVER_MESSAGE',
+      receivedAt: 1500,
+      message: { type: 'ko', id: 'me', by: 'p2', time: 5 },
+    });
+    expect(s.deathCam).not.toBeNull();
+    expect(s.deathCam?.attackerId).toBe('p2');
+    expect(s.deathCam?.untilMs).toBe(1500 + 1500);
+  });
+
+  it('SERVER_MESSAGE ko on another player does NOT arm death cam', () => {
+    let s = reducer(baseState(), {
+      type: 'SERVER_MESSAGE',
+      receivedAt: 1000,
+      message: {
+        type: 'welcome',
+        yourId: 'me',
+        track: 'mute-avenue',
+        phase: 'RACING',
+        countdown: 0,
+        startsIn: -1,
+        players: [],
+      },
+    });
+    s = reducer(s, {
+      type: 'SERVER_MESSAGE',
+      receivedAt: 1500,
+      message: { type: 'ko', id: 'p2', by: 'p3', time: 5 },
+    });
+    expect(s.deathCam).toBeNull();
+  });
+
   it('SERVER_MESSAGE ko adds an entry to myKos when by===myId', () => {
     let s = reducer(baseState(), {
       type: 'SERVER_MESSAGE',
@@ -306,6 +352,34 @@ describe('selectors', () => {
 
   it('liveLeaderboard returns empty list when no snapshots have arrived', () => {
     expect(liveLeaderboard(baseState())).toEqual([]);
+  });
+
+  it('spectatorTargetId follows the attacker while death cam is active', () => {
+    const s = {
+      ...stateWithSnapshot(),
+      deathCam: { attackerId: 'p2', untilMs: 1000 },
+    };
+    // nowMs < deathCam.untilMs → attacker is the target.
+    expect(spectatorTargetId(s, 500)).toBe('p2');
+    // nowMs >= deathCam.untilMs → falls back to leader (p2 is also leader,
+    // so use a setup where attacker isn't the leader).
+  });
+
+  it('spectatorTargetId reverts to leader after the death-cam window', () => {
+    const ships = [
+      { id: 'a', x: 0, y: 0, h: 0, vx: 0, vy: 0, p: 1, k: 0, l: 0, a: 100, f: 0, sc: 0, dc: 0 },
+      { id: 'b', x: 0, y: 0, h: 0, vx: 0, vy: 0, p: 1, k: 0, l: 0, a: 200, f: 0, sc: 0, dc: 0 },
+    ];
+    const s = {
+      ...baseState(),
+      myId: 'me',
+      snapshots: [
+        { tick: 1, time: 1, receivedAt: 0, racersLeft: 2, pk: 0, ships },
+      ],
+      deathCam: { attackerId: 'a', untilMs: 100 },
+    };
+    expect(spectatorTargetId(s, 50)).toBe('a'); // active
+    expect(spectatorTargetId(s, 200)).toBe('b'); // expired → leader
   });
 
   it('spectatorTargetId skips KO ships', () => {

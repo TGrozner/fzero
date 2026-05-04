@@ -51,12 +51,51 @@ const KEY_MAP: Record<string, keyof KeyState> = {
 
 const buildMap = (): Record<string, keyof KeyState> => KEY_MAP;
 
-/** Read keyboard state via a ref. The hook returns a getter for the current snapshot. */
+/**
+ * Unified input state. Returns a ref that game-loop reads each tick PLUS
+ * a `setAction` setter that touch controls (or any other input source)
+ * can call to drive the same action bits as the keyboard.
+ *
+ * The ref always contains the OR-combined state of every source — i.e. as
+ * long as any source has the action true, the ref reads true. We track
+ * sources separately so a touch release doesn't clobber a key that's
+ * still held, and vice versa.
+ */
+export type InputSource = 'kbd' | 'touch';
+export type InputApi = {
+  ref: React.MutableRefObject<KeyState>;
+  setAction: (source: InputSource, action: keyof KeyState, value: boolean) => void;
+};
+
 export const useKeyboard = (
   enabled: boolean,
   onPress?: (action: 'pause' | 'menu') => void,
-): React.MutableRefObject<KeyState> => {
+): InputApi => {
   const stateRef = useRef<KeyState>(empty());
+  // Per-source state — combined into stateRef on every mutation.
+  const sourcesRef = useRef<Record<InputSource, KeyState>>({
+    kbd: empty(),
+    touch: empty(),
+  });
+
+  const recompute = (): void => {
+    const merged = empty();
+    for (const action of Object.keys(merged) as (keyof KeyState)[]) {
+      merged[action] =
+        sourcesRef.current.kbd[action] || sourcesRef.current.touch[action];
+    }
+    stateRef.current = merged;
+  };
+
+  const setAction = (
+    source: InputSource,
+    action: keyof KeyState,
+    value: boolean,
+  ): void => {
+    sourcesRef.current[source] = { ...sourcesRef.current[source], [action]: value };
+    recompute();
+  };
+
   useEffect(() => {
     if (!enabled) return;
     const map = buildMap();
@@ -64,7 +103,8 @@ export const useKeyboard = (
       const action = map[e.code];
       if (!action) return;
       if (e.repeat) return;
-      stateRef.current = { ...stateRef.current, [action]: true };
+      sourcesRef.current.kbd = { ...sourcesRef.current.kbd, [action]: true };
+      recompute();
       if (action === 'pause' && onPress) onPress('pause');
       if (action === 'menu' && onPress) onPress('menu');
       e.preventDefault();
@@ -72,11 +112,13 @@ export const useKeyboard = (
     const onKeyUp = (e: KeyboardEvent) => {
       const action = map[e.code];
       if (!action) return;
-      stateRef.current = { ...stateRef.current, [action]: false };
+      sourcesRef.current.kbd = { ...sourcesRef.current.kbd, [action]: false };
+      recompute();
       e.preventDefault();
     };
     const onBlur = () => {
-      stateRef.current = empty();
+      sourcesRef.current.kbd = empty();
+      recompute();
     };
     window.addEventListener('keydown', onKeyDown);
     window.addEventListener('keyup', onKeyUp);
@@ -87,7 +129,8 @@ export const useKeyboard = (
       window.removeEventListener('blur', onBlur);
     };
   }, [enabled, onPress]);
-  return stateRef;
+
+  return { ref: stateRef, setAction };
 };
 
 /** Map raw keyboard state to game input fields. */

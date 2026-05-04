@@ -1,5 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
-import { type ClientState, type Action, findMyShip, spectatorTargetId } from '../state.ts';
+import {
+  type ClientState,
+  type Action,
+  findMyShip,
+  isDeathCamActive,
+  spectatorTargetId,
+} from '../state.ts';
 import { useGameLoop } from '../hooks/useGameLoop.ts';
 import { useKeyboard, keyboardToInput } from '../hooks/useKeyboard.ts';
 import { HUD } from './HUD.tsx';
@@ -15,6 +21,8 @@ import type { SocketAPI } from '../hooks/useGameSocket.ts';
 import { FLAG_KO } from '../../shared/protocol.ts';
 import { useHitPrediction } from './race/useHitPrediction.ts';
 import { useRaceReactor } from './race/useRaceReactor.ts';
+import { TouchControls } from './TouchControls.tsx';
+import { isTouchDevice } from './isTouchDevice.ts';
 
 type Props = {
   state: ClientState;
@@ -48,7 +56,8 @@ export function Race({ state, dispatch, socket, onLeave }: Props) {
     if (action === 'pause') dispatch({ type: 'TOGGLE_PAUSE' });
     if (action === 'menu') onLeave();
   };
-  const keys = useKeyboard(true, handlePress);
+  const input = useKeyboard(true, handlePress);
+  const keys = input.ref;
 
   // Keydown predictor for spin/side attacks.
   const { spinFlash, sideRing, hitMarkers, hitPops } = useHitPrediction(
@@ -149,6 +158,21 @@ export function Race({ state, dispatch, socket, onLeave }: Props) {
   const ship = findMyShip(state);
   const myKo = ship ? (ship.f & FLAG_KO) !== 0 : false;
   const showCountdown = state.phase === 'COUNTDOWN';
+  // Re-render once when the death-cam window expires so the fallback
+  // spectator overlay takes over without waiting for the next snapshot.
+  const [, setNow] = useState(0);
+  useEffect(() => {
+    if (!state.deathCam) return;
+    const remain = state.deathCam.untilMs - performance.now();
+    if (remain <= 0) return;
+    const t = window.setTimeout(() => setNow(performance.now()), remain + 50);
+    return () => window.clearTimeout(t);
+  }, [state.deathCam]);
+  const deathCamOn = isDeathCamActive(state);
+  const deathCamAttackerName =
+    state.deathCam?.attackerId
+      ? state.players[state.deathCam.attackerId]?.name ?? state.deathCam.attackerId
+      : null;
 
   return (
     <div className="canvas-wrap" data-testid="race-screen" ref={wrapRef}>
@@ -230,7 +254,18 @@ export function Race({ state, dispatch, socket, onLeave }: Props) {
           </div>
         </div>
       )}
-      {myKo && state.phase === 'RACING' && (
+      {/* Death cam: brief tracking shot of whoever KO'd us, with a banner. */}
+      {deathCamOn && state.phase === 'RACING' && (
+        <div className="death-cam-overlay" data-testid="death-cam">
+          <div className="death-cam-tag">
+            KO'd by{' '}
+            <span style={{ color: 'var(--danger)' }}>
+              {deathCamAttackerName ?? 'the track'}
+            </span>
+          </div>
+        </div>
+      )}
+      {myKo && !deathCamOn && state.phase === 'RACING' && (
         <div className="spectator-overlay" data-testid="spectator">
           <div className="panel">
             <h3>KO'd</h3>
@@ -306,6 +341,9 @@ export function Race({ state, dispatch, socket, onLeave }: Props) {
           p99={profileSnapshot.p99}
           particles={profileSnapshot.particles}
         />
+      )}
+      {isTouchDevice() && state.phase === 'RACING' && !myKo && !state.paused && (
+        <TouchControls input={input} />
       )}
       {state.rttMs !== null && (
         <div

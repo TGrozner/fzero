@@ -2,6 +2,7 @@ import type { Action } from '../state.ts';
 import { SHIP_CLASSES, SHIP_COLORS, type ShipClass } from '../../shared/constants.ts';
 import { TRACKS } from '../../shared/track.ts';
 import { type BestTimesStore, formatTimeMs, loadBestTimes } from '../storage/bestTimes.ts';
+import { MenuBackdrop } from './MenuBackdrop.tsx';
 
 type Props = {
   pseudo: string;
@@ -44,7 +45,9 @@ export function Menu({
   const bestTimes: BestTimesStore = loadBestTimes();
   const pb = bestTimes[trackId];
   return (
-    <div className="menu" data-testid="menu">
+    <>
+      <MenuBackdrop color={color} cls={cls} />
+      <div className="menu" data-testid="menu">
       <h1>F-ZERO 99</h1>
       <div className="row" style={{ flexDirection: 'column', alignItems: 'stretch', gap: 4 }}>
         <label htmlFor="pseudo">Pilot name</label>
@@ -204,5 +207,6 @@ export function Menu({
         WASD / Arrows to drive · Shift boost · Q/E side attack · Enter spin attack · Space skyway · P pause · Esc menu
       </div>
     </div>
+    </>
   );
 }

@@ -87,6 +87,12 @@ export type ClientState = {
   koLog: readonly KoLogEntry[];
   /** Recent hit events from the server — drives world-space impact FX. */
   hitEvents: readonly HitEvent[];
+  /**
+   * Death-cam state. Set when the local player is KO'd; cleared after the
+   * cam plays out. While active, the renderer follows `attackerId` (the
+   * player who scored the KO, if known) and the UI shows a banner.
+   */
+  deathCam: { attackerId: string | null; untilMs: number } | null;
 };
 
 export const buildInitialClientState = (): ClientState => ({
@@ -115,7 +121,10 @@ export const buildInitialClientState = (): ClientState => ({
   pickupEvents: [],
   koLog: [],
   hitEvents: [],
+  deathCam: null,
 });
+
+const DEATH_CAM_DURATION_MS = 1500;
 
 export type Action =
   | { type: 'SET_PSEUDO'; pseudo: string }
@@ -270,6 +279,14 @@ const applyServer = (
       // Drop popups older than 2s.
       const cutoff = now - 2000;
       const fresh = state.myKos.filter((k) => k.at > cutoff);
+      // Death cam: when the local player is KO'd, lock the camera onto
+      // whoever did it for ~1.5s. msg.by is null for self-inflicted (mine,
+      // wall) KOs — we still arm the cam so the player gets a moment of
+      // narrative pause; the renderer falls back to the leader in that case.
+      const deathCam =
+        msg.id === state.myId
+          ? { attackerId: msg.by, untilMs: now + DEATH_CAM_DURATION_MS }
+          : state.deathCam;
       // Capture the victim's position from the latest snapshot for the
       // results-screen recap.
       const last = state.snapshots[state.snapshots.length - 1];
@@ -282,7 +299,7 @@ const applyServer = (
         y: victim ? victim.y : null,
       };
       const koLog = [...state.koLog, entry].slice(-12);
-      const next: ClientState = { ...state, koLog };
+      const next: ClientState = { ...state, koLog, deathCam };
       if (msg.by === state.myId) {
         next.myKos = [...fresh, { id: msg.id, at: now }];
       } else if (fresh.length !== state.myKos.length) {
@@ -374,10 +391,31 @@ export const liveLeaderboard = (
   return top;
 };
 
-/** Find the id of the ship the spectator camera should follow (alive leader). */
-export const spectatorTargetId = (state: ClientState): string | null => {
+/**
+ * Pick the ship the spectator camera should follow.
+ *
+ * 1. While death cam is active and the attacker is still alive in the
+ *    snapshot → follow them (keeps the moment of "this is who killed me").
+ * 2. Otherwise, follow the alive leader (highest arc length).
+ *
+ * `nowMs` lets the caller decide what "now" means (default
+ * `performance.now()` in the browser; tests pass an explicit value).
+ */
+export const spectatorTargetId = (
+  state: ClientState,
+  nowMs: number = typeof performance !== 'undefined' ? performance.now() : 0,
+): string | null => {
   const last = state.snapshots[state.snapshots.length - 1];
   if (!last) return null;
+  // Death-cam priority.
+  if (
+    state.deathCam &&
+    state.deathCam.attackerId &&
+    state.deathCam.untilMs > nowMs
+  ) {
+    const target = last.ships.find((s) => s.id === state.deathCam!.attackerId);
+    if (target && (target.f & 4) === 0) return state.deathCam.attackerId;
+  }
   let bestId: string | null = null;
   let bestArc = -Infinity;
   for (const s of last.ships) {
@@ -389,3 +427,9 @@ export const spectatorTargetId = (state: ClientState): string | null => {
   }
   return bestId;
 };
+
+/** True if the death-cam window is still active (post-local-KO). */
+export const isDeathCamActive = (
+  state: ClientState,
+  nowMs: number = typeof performance !== 'undefined' ? performance.now() : 0,
+): boolean => state.deathCam !== null && state.deathCam.untilMs > nowMs;

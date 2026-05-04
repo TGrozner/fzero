@@ -25,7 +25,7 @@ import type { ShipSnapshot } from '../../shared/protocol.ts';
 import { FLAG_FREE_BOOST, FLAG_KO, FLAG_SKYWAY } from '../../shared/protocol.ts';
 import type { Track } from '../../shared/track.ts';
 import { closestOnTrack, edgePoint } from '../../shared/track.ts';
-import { type ClientState, type PickupEvent, type HitEvent } from '../state.ts';
+import { type ClientState, type PickupEvent, type HitEvent, spectatorTargetId } from '../state.ts';
 import { findTrack } from '../../shared/track.ts';
 import { type PlayerInfoMsg } from '../../shared/protocol.ts';
 import { lerpAngle, wrapAngle } from '../../shared/vec2.ts';
@@ -996,36 +996,19 @@ export const renderFrame = (
 
   const localShip = state.myId ? ships.get(state.myId) : undefined;
   const localKo = localShip ? (localShip.flags & FLAG_KO) !== 0 : false;
-  // When the local player is KO'd or hasn't been placed yet, switch the camera
-  // to spectate the leader. Find the leader by highest arcLength among the
-  // alive ships in the latest snapshot.
+  // When the local player is KO'd, hasn't been placed yet, or the death cam
+  // is active, switch the camera to the spectator target (death cam picks
+  // the attacker; otherwise the alive leader by arc length).
   let me = localShip;
-  let spectating: string | null = null;
   if (!me || localKo) {
-    const last = state.snapshots[state.snapshots.length - 1];
-    if (last) {
-      let bestId: string | null = null;
-      let bestArc = -Infinity;
-      for (const s of last.ships) {
-        if ((s.f & FLAG_KO) !== 0) continue;
-        if (s.a > bestArc) {
-          bestArc = s.a;
-          bestId = s.id;
-        }
-      }
-      if (bestId) {
-        me = ships.get(bestId);
-        if (bestId !== state.myId) spectating = bestId;
-      }
-    }
+    const targetId = spectatorTargetId(state, nowMs);
+    if (targetId) me = ships.get(targetId);
   }
   if (!me) {
-    // Reset the per-frame timer so the first in-race frame doesn't see a giant dt.
     rstate.consumeDt(nowMs);
     drawOverview(rc, track, state, ships);
     return;
   }
-  void spectating; // surfaced via the UI overlay separately
 
   // Per-frame dt up front so all smoothing is dt-aware.
   const dtSec = rstate.consumeDt(nowMs) / 1000;
