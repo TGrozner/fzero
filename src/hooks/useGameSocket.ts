@@ -10,7 +10,7 @@ export type SocketAPI = {
   disconnect: () => void;
 };
 
-const SESSION_KEY = 'fzero99:session';
+const SESSION_KEY = 'neon-drift:session';
 
 export const getOrCreateSession = (): string => {
   if (typeof window === 'undefined') return 'dev';

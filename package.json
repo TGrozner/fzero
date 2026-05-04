@@ -1,5 +1,5 @@
 {
-  "name": "fzero",
+  "name": "neon-drift",
   "private": true,
   "version": "0.1.0",
   "type": "module",
@@ -18,7 +18,7 @@
     "e2e": "playwright test",
     "e2e:install": "playwright install --with-deps chromium",
     "deploy:server": "wrangler deploy",
-    "deploy:client": "wrangler pages deploy dist --project-name=fzero --branch=main"
+    "deploy:client": "wrangler pages deploy dist --project-name=neon-drift --branch=main"
   },
   "dependencies": {
     "react": "^19.2.5",

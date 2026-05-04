@@ -2,7 +2,7 @@
 // send a hello, wait for welcome + 1 snapshot.
 import WebSocket from 'ws';
 
-const URL = process.env.SMOKE_URL ?? 'wss://fzero-server.thomas-grozner.workers.dev/ws?fast=1';
+const URL = process.env.SMOKE_URL ?? 'wss://neon-drift-server.thomas-grozner.workers.dev/ws?fast=1';
 
 const ws = new WebSocket(URL);
 let gotWelcome = false;

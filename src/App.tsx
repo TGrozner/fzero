@@ -12,7 +12,7 @@ import {
   type ShipClass,
 } from '../shared/constants.ts';
 
-const STORAGE_KEY = 'fzero99:profile';
+const STORAGE_KEY = 'neon-drift:profile';
 
 type Profile = {
   pseudo: string;

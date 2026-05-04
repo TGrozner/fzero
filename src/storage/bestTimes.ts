@@ -7,7 +7,7 @@
  * drift across saves.
  */
 
-const KEY = 'fzero99:best-times';
+const KEY = 'neon-drift:best-times';
 
 export type TrackBest = {
   /** Fastest single-lap split, in milliseconds. null if never set. */

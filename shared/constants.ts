@@ -70,7 +70,7 @@ export const SHIP_CLASSES: readonly ShipClass[] = ['speed', 'tank', 'balanced'];
 export const DEFAULT_SHIP_CLASS: ShipClass = 'balanced';
 
 /** Perfect-start mechanic: full-throttle at the GO moment grants this much
- *  free boost, replicating the F-Zero arcade-style rocket start. */
+ *  free boost: an arcade-style rocket-start mechanic. */
 export const PERFECT_START_WINDOW_S = 0.18;
 export const PERFECT_START_BOOST_S = 1.5;
 

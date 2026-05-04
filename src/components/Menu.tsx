@@ -48,7 +48,7 @@ export function Menu({
     <>
       <MenuBackdrop color={color} cls={cls} />
       <div className="menu" data-testid="menu">
-      <h1>F-ZERO 99</h1>
+      <h1>NEON DRIFT</h1>
       <div className="row" style={{ flexDirection: 'column', alignItems: 'stretch', gap: 4 }}>
         <label htmlFor="pseudo">Pilot name</label>
         <input

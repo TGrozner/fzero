@@ -83,7 +83,7 @@ describe('localStorage round-trip', () => {
 
   it('survives malformed JSON gracefully', () => {
     if (typeof localStorage === 'undefined') return;
-    localStorage.setItem('fzero99:best-times', 'not-json');
+    localStorage.setItem('neon-drift:best-times', 'not-json');
     expect(loadBestTimes()).toEqual({});
   });
 });

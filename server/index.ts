@@ -43,7 +43,7 @@ export default {
       return stub.fetch(fwd);
     }
     if (url.pathname === '/') {
-      return new Response('fzero server', { status: 200, headers: CORS_HEADERS });
+      return new Response('neon-drift server', { status: 200, headers: CORS_HEADERS });
     }
     return new Response('Not Found', { status: 404, headers: CORS_HEADERS });
   },

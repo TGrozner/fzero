@@ -1,6 +1,6 @@
-# F-Zero 99
+# Neon Drift
 
-A 99-player online battle-royale racing game inspired by Nintendo's F-Zero 99, built end-to-end with React + TypeScript + Cloudflare Workers + Durable Objects.
+A 99-player synthwave anti-grav battle-royale racer, built end-to-end with React + TypeScript + Cloudflare Workers + Durable Objects.
 
 > Top-down anti-grav racing. Real-time WebSocket multiplayer. Bots fill empty seats so it's always 99 racers on the grid.
 
@@ -12,7 +12,13 @@ A 99-player online battle-royale racing game inspired by Nintendo's F-Zero 99, b
 - **Side attacks** (Q/E) — lateral burst that knocks rivals away.
 - **Skyway** (Space) — once the KO Meter is full, fly above the track for 5s, immune to collisions.
 - **Last-20 boost** — when racers drop below 20, every survivor gets a free 3s boost.
-- **2 tracks** — `Mute Avenue` (oval) and `Big Blue` (peanut).
+- **3 tracks** — `Mute Avenue` (oval), `Big Blue` (peanut), and `Port Town` (chicane).
+- **3 ship classes** — Speed (top speed), Tank (steering + restitution), Balanced.
+- **Perfect start** — full throttle on GO grants a free 1.5 s boost.
+- **Pickups** — boost pads, heal plates, and mines, respawning every 5 s.
+- **Death cam** — when you're KO'd, the camera locks onto whoever did it for ~1.5 s.
+- **Personal bests** — best lap + best race per track, persisted locally.
+- **Mobile-ready** — touch joystick + action buttons on phones / tablets.
 - Real-time **server-authoritative** simulation @ 30 Hz, snapshots @ 20 Hz, with client interpolation.
 - Lobby with auto-start: 25s after the first pilot joins, shortened to 12s when a 2nd shows up.
 
@@ -124,7 +130,7 @@ To deploy manually:
 
 ```bash
 npx wrangler deploy                                    # Worker (server)
-npx wrangler pages deploy dist --project-name=fzero    # Pages (client)
+npx wrangler pages deploy dist --project-name=neon-drift    # Pages (client)
 ```
 
 The client picks the server URL from `VITE_SERVER_URL` (set this in your Pages project env) and falls back to `wss://<your-pages-domain>/ws`.

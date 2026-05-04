@@ -1,4 +1,4 @@
-name = "fzero-server"
+name = "neon-drift-server"
 main = "server/index.ts"
 compatibility_date = "2026-04-01"
 compatibility_flags = ["nodejs_compat"]
