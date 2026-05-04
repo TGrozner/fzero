@@ -460,19 +460,6 @@ const drawGrid = (rc: RenderContext, cam: CamPose, cfg: CamConfig): void => {
   }
 };
 
-type EdgePoint = { sx: number; sy: number; depth: number; visible: boolean; wx: number; wy: number };
-
-const projectEdge = (
-  wx: number,
-  wy: number,
-  cam: CamPose,
-  cfg: CamConfig,
-  screenW: number,
-): EdgePoint => {
-  const p = project(wx, wy, cam, cfg, screenW);
-  return { ...p, wx, wy };
-};
-
 const drawTrack = (
   rc: RenderContext,
   track: Track,
@@ -483,115 +470,166 @@ const drawTrack = (
   const { ctx, width } = rc;
   const N = track.centerline.length;
 
-  // Project both edges of each segment, with near-plane clipping per side.
-  const projL: EdgePoint[] = [];
-  const projR: EdgePoint[] = [];
-  const segIndices: number[] = [];
-  for (let off = -SEGMENTS_BEHIND; off <= SEGMENTS_AHEAD; off++) {
+  // Sample both edges of each segment in world space across the visible window.
+  // Tessellate each segment into multiple sub-points so curves stay smooth and
+  // the near-plane clip produces a tight, gap-free polygon.
+  const SUBS = 3;
+  type EdgeSample = { x: number; y: number; z: number; idx: number; subT: number };
+  const cosH = Math.cos(cam.heading);
+  const sinH = Math.sin(cam.heading);
+  const camZ = (x: number, y: number): number =>
+    (x - cam.posX) * cosH + (y - cam.posY) * sinH;
+
+  // Cap the visible window so we never render the same segment twice (the
+  // track is a closed loop). For tracks shorter than SEGMENTS_AHEAD this would
+  // otherwise build a self-overlapping polygon and the per-segment decorations
+  // would draw lines that straddle the near plane on the far side, producing
+  // huge off-screen projections.
+  const aheadMax = Math.min(SEGMENTS_AHEAD, N - 1 - SEGMENTS_BEHIND);
+  const leftPts: EdgeSample[] = [];
+  const rightPts: EdgeSample[] = [];
+  for (let off = -SEGMENTS_BEHIND; off <= aheadMax; off++) {
     const idx = ((centerSegIdx + off) % N + N) % N;
-    const pl = edgePoint(track, idx, 0, 1);
-    const pr = edgePoint(track, idx, 0, -1);
-    projL.push(projectEdge(pl.x, pl.y, cam, cfg, width));
-    projR.push(projectEdge(pr.x, pr.y, cam, cfg, width));
-    segIndices.push(idx);
+    const lastSeg = off === aheadMax;
+    const subCount = lastSeg ? SUBS + 1 : SUBS;
+    for (let s = 0; s < subCount; s++) {
+      const t = s / SUBS;
+      const pl = edgePoint(track, idx, t, 1);
+      const pr = edgePoint(track, idx, t, -1);
+      leftPts.push({ x: pl.x, y: pl.y, z: camZ(pl.x, pl.y), idx, subT: t });
+      rightPts.push({ x: pr.x, y: pr.y, z: camZ(pr.x, pr.y), idx, subT: t });
+    }
   }
 
-  // Build per-segment clipped corners. Each "rib" is a (left, right) pair.
-  type Rib = {
-    L: { sx: number; sy: number; depth: number };
-    R: { sx: number; sy: number; depth: number };
-    fromIdx: number;
-  };
-  const ribs: Rib[] = [];
-  for (let i = 0; i < projL.length; i++) {
-    const lp = projL[i] as EdgePoint;
-    const rp = projR[i] as EdgePoint;
-    if (lp.visible && rp.visible) {
-      ribs.push({
-        L: { sx: lp.sx, sy: lp.sy, depth: lp.depth },
-        R: { sx: rp.sx, sy: rp.sy, depth: rp.depth },
-        fromIdx: segIndices[i] as number,
+  // Build closed world-space polygon (left forward, right backward), clip it
+  // against the near plane (Sutherland-Hodgman), then project. This is the
+  // only correct way to keep the surface visible right up to the camera —
+  // simply skipping ribs whose corner crosses the near plane would leave a
+  // hole in front of the player.
+  type WorldPt = { x: number; y: number; z: number };
+  const poly: WorldPt[] = [];
+  for (const p of leftPts) poly.push({ x: p.x, y: p.y, z: p.z });
+  for (let i = rightPts.length - 1; i >= 0; i--) {
+    const p = rightPts[i] as EdgeSample;
+    poly.push({ x: p.x, y: p.y, z: p.z });
+  }
+  // Slight epsilon above NEAR_PLANE so projected clip intersections remain
+  // marked visible by `project()` (which gates on `z > NEAR_PLANE`).
+  const CLIP_Z = NEAR_PLANE + 0.01;
+  const clipped: WorldPt[] = [];
+  for (let i = 0; i < poly.length; i++) {
+    const a = poly[i] as WorldPt;
+    const b = poly[(i + 1) % poly.length] as WorldPt;
+    const aIn = a.z >= CLIP_Z;
+    const bIn = b.z >= CLIP_Z;
+    if (aIn) clipped.push(a);
+    if (aIn !== bIn) {
+      const t = (CLIP_Z - a.z) / (b.z - a.z);
+      clipped.push({
+        x: a.x + (b.x - a.x) * t,
+        y: a.y + (b.y - a.y) * t,
+        z: CLIP_Z,
       });
     }
-    // If either side is behind near plane we skip this rib (the previous
-    // visible rib already provided a clipped boundary via its successor).
   }
-  if (ribs.length < 2) return;
+  if (clipped.length < 3) return;
 
-  // Single contiguous polygon: walk left edge forward (near→far), then walk
-  // right edge backward (far→near). This eliminates the visible seams that
-  // appear when adjacent quads are filled separately.
   ctx.fillStyle = '#2c1a5a';
   ctx.beginPath();
-  for (let i = 0; i < ribs.length; i++) {
-    const r = ribs[i] as Rib;
-    if (i === 0) ctx.moveTo(r.L.sx, r.L.sy);
-    else ctx.lineTo(r.L.sx, r.L.sy);
-  }
-  for (let i = ribs.length - 1; i >= 0; i--) {
-    const r = ribs[i] as Rib;
-    ctx.lineTo(r.R.sx, r.R.sy);
+  for (let i = 0; i < clipped.length; i++) {
+    const p = clipped[i] as WorldPt;
+    const proj = project(p.x, p.y, cam, cfg, width);
+    if (i === 0) ctx.moveTo(proj.sx, proj.sy);
+    else ctx.lineTo(proj.sx, proj.sy);
   }
   ctx.closePath();
   ctx.fill();
 
-  // Subtle alternating rib shading on top of the base fill — gives a sense
-  // of motion without visible seams.
-  for (let i = 0; i < ribs.length - 1; i++) {
-    const a = ribs[i] as Rib;
-    const b = ribs[i + 1] as Rib;
-    if ((a.fromIdx & 1) !== 0) continue;
-    const depth = (a.L.depth + a.R.depth + b.L.depth + b.R.depth) / 4;
+  // Per-rib decorations (alt shading, edge stripes, centre dash). Each is
+  // emitted segment-by-segment with proper near-plane clipping so they line
+  // up perfectly with the surface boundary.
+
+  // Per-segment decorations need a comfortable safety margin from the near
+  // plane: at z very close to NEAR_PLANE the projection diverges (sx → ±∞),
+  // which would draw decorative lines off to infinity. The base surface
+  // polygon (clipped via Sutherland-Hodgman) already covers everything from
+  // the camera up to here, so this margin is invisible.
+  const DECOR_MIN_Z = 1.5;
+
+  // Alt rib shading — every other source segment.
+  for (let i = 0; i < leftPts.length - 1; i++) {
+    const al = leftPts[i] as EdgeSample;
+    const bl = leftPts[i + 1] as EdgeSample;
+    if (al.idx !== bl.idx) continue;
+    if ((al.idx & 1) !== 0) continue;
+    const ar = rightPts[i] as EdgeSample;
+    const br = rightPts[i + 1] as EdgeSample;
+    if (al.z < DECOR_MIN_Z || bl.z < DECOR_MIN_Z || ar.z < DECOR_MIN_Z || br.z < DECOR_MIN_Z)
+      continue;
+    const depth = (al.z + bl.z + ar.z + br.z) / 4;
     const fa = fogAlpha(depth);
     if (fa <= 0.02) continue;
+    const pAL = project(al.x, al.y, cam, cfg, width);
+    const pBL = project(bl.x, bl.y, cam, cfg, width);
+    const pBR = project(br.x, br.y, cam, cfg, width);
+    const pAR = project(ar.x, ar.y, cam, cfg, width);
     ctx.fillStyle = `rgba(54, 32, 110, ${fa * 0.55})`;
     ctx.beginPath();
-    ctx.moveTo(a.L.sx, a.L.sy);
-    ctx.lineTo(b.L.sx, b.L.sy);
-    ctx.lineTo(b.R.sx, b.R.sy);
-    ctx.lineTo(a.R.sx, a.R.sy);
+    ctx.moveTo(pAL.sx, pAL.sy);
+    ctx.lineTo(pBL.sx, pBL.sy);
+    ctx.lineTo(pBR.sx, pBR.sy);
+    ctx.lineTo(pAR.sx, pAR.sy);
     ctx.closePath();
     ctx.fill();
   }
 
-  // Edge stripes — single polyline per side, depth-attenuated alpha along.
+  // Edge stripes per side.
   for (const side of [-1, 1] as const) {
     const color = side === -1 ? 'rgba(255, 58, 209,' : 'rgba(58, 255, 225,';
-    for (let i = 0; i < ribs.length - 1; i++) {
-      const a = ribs[i] as Rib;
-      const b = ribs[i + 1] as Rib;
-      const aP = side === -1 ? a.R : a.L;
-      const bP = side === -1 ? b.R : b.L;
-      const depth = (a.L.depth + b.L.depth) / 2;
+    const pts = side === -1 ? rightPts : leftPts;
+    for (let i = 0; i < pts.length - 1; i++) {
+      const a = pts[i] as EdgeSample;
+      const b = pts[i + 1] as EdgeSample;
+      if (a.z < DECOR_MIN_Z || b.z < DECOR_MIN_Z) continue;
+      const depth = (a.z + b.z) / 2;
       const fa = fogAlpha(depth);
       if (fa <= 0.02) continue;
+      const pA = project(a.x, a.y, cam, cfg, width);
+      const pB = project(b.x, b.y, cam, cfg, width);
       const edgeAlpha = fa * Math.max(0.35, 1 - depth / 220);
       ctx.lineWidth = Math.max(1, 3 - depth / 80);
       ctx.strokeStyle = `${color} ${edgeAlpha})`;
       ctx.beginPath();
-      ctx.moveTo(aP.sx, aP.sy);
-      ctx.lineTo(bP.sx, bP.sy);
+      ctx.moveTo(pA.sx, pA.sy);
+      ctx.lineTo(pB.sx, pB.sy);
       ctx.stroke();
     }
   }
 
-  // Centre dashed lane stripe — every other rib pair.
-  for (let i = 0; i < ribs.length - 1; i++) {
-    const a = ribs[i] as Rib;
-    const b = ribs[i + 1] as Rib;
-    if ((a.fromIdx & 1) !== 0) continue;
-    const depth = (a.L.depth + b.L.depth) / 2;
+  // Centre dashed lane stripe — every other source segment.
+  for (let i = 0; i < leftPts.length - 1; i++) {
+    const al = leftPts[i] as EdgeSample;
+    const bl = leftPts[i + 1] as EdgeSample;
+    if (al.idx !== bl.idx) continue;
+    if ((al.idx & 1) !== 0) continue;
+    const ar = rightPts[i] as EdgeSample;
+    const br = rightPts[i + 1] as EdgeSample;
+    if (al.z < DECOR_MIN_Z || bl.z < DECOR_MIN_Z || ar.z < DECOR_MIN_Z || br.z < DECOR_MIN_Z)
+      continue;
+    const m1x = (al.x + ar.x) / 2;
+    const m1y = (al.y + ar.y) / 2;
+    const m2x = (bl.x + br.x) / 2;
+    const m2y = (bl.y + br.y) / 2;
+    const depth = (al.z + bl.z) / 2;
     const fa = fogAlpha(depth);
     if (fa <= 0.02) continue;
-    const m1x = (a.L.sx + a.R.sx) / 2;
-    const m1y = (a.L.sy + a.R.sy) / 2;
-    const m2x = (b.L.sx + b.R.sx) / 2;
-    const m2y = (b.L.sy + b.R.sy) / 2;
+    const pA = project(m1x, m1y, cam, cfg, width);
+    const pB = project(m2x, m2y, cam, cfg, width);
     ctx.strokeStyle = `rgba(255, 255, 255, ${fa * Math.max(0.3, 1 - depth / 220) * 0.5})`;
     ctx.lineWidth = Math.max(1, 2.5 - depth / 100);
     ctx.beginPath();
-    ctx.moveTo(m1x, m1y);
-    ctx.lineTo(m2x, m2y);
+    ctx.moveTo(pA.sx, pA.sy);
+    ctx.lineTo(pB.sx, pB.sy);
     ctx.stroke();
   }
 
