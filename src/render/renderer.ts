@@ -1223,6 +1223,12 @@ const drawSpeedFx = (
   }
 };
 
+/**
+ * Pickup pads: draw all pads of the same kind in one stylesheet pass to
+ * minimise state changes. No shadowBlur — at ~14 pads/track that was 14
+ * per-frame gaussian blurs which is wasteful when most pads are off-screen
+ * or behind the camera.
+ */
 const drawPickups = (
   rc: RenderContext,
   track: Track,
@@ -1234,48 +1240,70 @@ const drawPickups = (
   const { ctx, width } = rc;
   const cache = getPickupCache(track);
   const pulse = 0.85 + 0.15 * Math.sin(nowMs * 0.006);
+
+  // First pass: project visible pads once.
+  type Drawn = { sx: number; sy: number; r: number; fa: number; kind: 'boost' | 'heal' | 'mine' };
+  const drawn: Drawn[] = [];
   for (let i = 0; i < cache.layout.length; i++) {
-    const active = (activeMask & (1 << i)) !== 0;
-    if (!active) continue;
+    if ((activeMask & (1 << i)) === 0) continue;
     const spec = cache.layout[i] as PickupSpec;
     const pos = cache.positions[i] as { x: number; y: number };
     const proj = project(pos.x, pos.y, cam, cfg, width);
     if (!proj.visible) continue;
     const fa = fogAlpha(proj.depth);
-    if (fa <= 0.02) continue;
+    if (fa <= 0.04) continue;
     const r = Math.max(2.5, (cfg.focal * 6) / proj.depth) * pulse;
-    let fill = '#ffd23a';
-    let glyph = '>';
-    if (spec.kind === 'heal') {
-      fill = '#3eff8b';
-      glyph = '+';
-    } else if (spec.kind === 'mine') {
-      fill = '#ff4040';
-      glyph = 'x';
-    }
-    ctx.save();
-    ctx.globalAlpha = fa;
-    ctx.shadowColor = fill;
-    ctx.shadowBlur = Math.min(18, r * 1.4);
-    ctx.fillStyle = fill;
-    ctx.beginPath();
-    ctx.arc(proj.sx, proj.sy, r, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.shadowBlur = 0;
-    ctx.fillStyle = 'rgba(10, 5, 36, 0.9)';
-    ctx.font = `${Math.max(8, Math.round(r * 1.3))}px ui-sans-serif, system-ui`;
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText(glyph, proj.sx, proj.sy + 1);
-    ctx.restore();
+    drawn.push({ sx: proj.sx, sy: proj.sy, r, fa, kind: spec.kind });
   }
+  if (drawn.length === 0) return;
+
+  // Second pass: bucket by kind and stroke each bucket as a single path.
+  const colors = { boost: '#ffd23a', heal: '#3eff8b', mine: '#ff4040' } as const;
+  for (const kind of ['boost', 'heal', 'mine'] as const) {
+    const sub = drawn.filter((d) => d.kind === kind);
+    if (sub.length === 0) continue;
+    ctx.fillStyle = colors[kind];
+    ctx.globalAlpha = 0.85;
+    ctx.beginPath();
+    for (const d of sub) {
+      ctx.moveTo(d.sx + d.r, d.sy);
+      ctx.arc(d.sx, d.sy, d.r, 0, Math.PI * 2);
+    }
+    ctx.fill();
+  }
+  // Glyphs in a single pass.
+  const glyphFor: Record<'boost' | 'heal' | 'mine', string> = {
+    boost: '>',
+    heal: '+',
+    mine: 'x',
+  };
+  ctx.fillStyle = 'rgba(10, 5, 36, 0.9)';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  let lastFont = '';
+  for (const d of drawn) {
+    const font = `${Math.max(8, Math.round(d.r * 1.3))}px ui-sans-serif, system-ui`;
+    if (font !== lastFont) {
+      ctx.font = font;
+      lastFont = font;
+    }
+    ctx.fillText(glyphFor[d.kind], d.sx, d.sy + 1);
+  }
+  ctx.globalAlpha = 1;
 };
 
 /**
- * Draw a fading neon trail behind every ship. Trails are stored as the last
- * N world positions (see RenderState.updateTrails); each segment is drawn
- * with alpha proportional to its age in the trail.
+ * Draw a fading neon trail behind every ship.
+ *
+ * Performance: trails are drawn as ONE path per ship (one beginPath + stroke
+ * call) at constant width and a single pre-multiplied alpha. The previous
+ * per-segment loop with `shadowBlur` was the dominant cost when 99 ships
+ * cluster, because Canvas2D shadows are essentially a per-stroke gaussian
+ * blur — multiplied by ~800 strokes/frame they tank the GPU. We cull trails
+ * whose ship is far behind or far ahead of the camera, so when the cluster
+ * sits behind us we pay almost nothing.
  */
+const TRAIL_MAX_DEPTH = 220;
 const drawTrails = (
   rc: RenderContext,
   rstate: RenderState,
@@ -1285,36 +1313,48 @@ const drawTrails = (
   cfg: CamConfig,
 ): void => {
   const { ctx, width } = rc;
+  const cosH = Math.cos(cam.heading);
+  const sinH = Math.sin(cam.heading);
   ctx.save();
   ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  ctx.lineWidth = 2;
   for (const [id, s] of ships) {
-    const ko = (s.flags & FLAG_KO) !== 0;
-    if (ko) continue;
+    if ((s.flags & FLAG_KO) !== 0) continue;
+    // Cheap depth cull on the ship's pivot — if the ship itself is behind the
+    // camera or past the fog wall, its whole trail is invisible.
+    const dx = s.x - cam.posX;
+    const dy = s.y - cam.posY;
+    const z = dx * cosH + dy * sinH;
+    if (z <= NEAR_PLANE || z > TRAIL_MAX_DEPTH) continue;
     const trail = rstate.trail(id);
     if (trail.length < 2) continue;
     const color = state.players[id]?.color ?? '#888';
-    for (let i = 1; i < trail.length; i++) {
-      const a = trail[i - 1] as { x: number; y: number };
-      const b = trail[i] as { x: number; y: number };
-      const pa = project(a.x, a.y, cam, cfg, width);
-      const pb = project(b.x, b.y, cam, cfg, width);
-      if (!pa.visible || !pb.visible) continue;
-      const ageNorm = i / trail.length; // newest = ~1, oldest = ~1/N
-      const fa = fogAlpha(Math.min(pa.depth, pb.depth));
-      const alpha = ageNorm * fa * 0.55;
-      if (alpha <= 0.02) continue;
-      ctx.strokeStyle = color;
-      ctx.globalAlpha = alpha;
-      ctx.shadowColor = color;
-      ctx.shadowBlur = 6 * ageNorm;
-      ctx.lineWidth = Math.max(1, 3 * ageNorm * (1 - Math.min(0.85, pa.depth / 220)));
-      ctx.beginPath();
-      ctx.moveTo(pa.sx, pa.sy);
-      ctx.lineTo(pb.sx, pb.sy);
-      ctx.stroke();
+    // Single path: walk the trail forward, stroking what survives near-plane
+    // and emitting fresh sub-paths around each behind-camera vertex. We skip
+    // shadowBlur entirely — the alpha + neon colour read as glow on dark bg.
+    ctx.beginPath();
+    let started = false;
+    for (let i = 0; i < trail.length; i++) {
+      const p = trail[i] as { x: number; y: number };
+      const pz = (p.x - cam.posX) * cosH + (p.y - cam.posY) * sinH;
+      if (pz <= NEAR_PLANE) {
+        started = false;
+        continue;
+      }
+      const proj = project(p.x, p.y, cam, cfg, width);
+      if (!started) {
+        ctx.moveTo(proj.sx, proj.sy);
+        started = true;
+      } else {
+        ctx.lineTo(proj.sx, proj.sy);
+      }
     }
+    const fa = fogAlpha(z);
+    ctx.globalAlpha = fa * 0.45;
+    ctx.strokeStyle = color;
+    ctx.stroke();
   }
-  ctx.shadowBlur = 0;
   ctx.globalAlpha = 1;
   ctx.restore();
 };
