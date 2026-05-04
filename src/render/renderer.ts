@@ -857,40 +857,74 @@ export const renderMinimap = (
 ): void => {
   ctx.clearRect(0, 0, width, height);
   const track = findTrack(state.trackId);
+  const last = state.snapshots[state.snapshots.length - 1];
+  const me = last?.ships.find((s) => s.id === state.myId);
+  // Find scaling so the whole track fits even after rotation: use the
+  // diameter (max bound) so rotating doesn't cause clipping.
   const bounds = trackBounds(track);
   const w = bounds.maxX - bounds.minX;
   const h = bounds.maxY - bounds.minY;
-  const sx = (width - 16) / w;
-  const sy = (height - 16) / h;
-  const s = Math.min(sx, sy);
-  const ox = (width - w * s) / 2 - bounds.minX * s;
-  const oy = (height - h * s) / 2 - bounds.minY * s;
+  const cx = (bounds.maxX + bounds.minX) / 2;
+  const cy = (bounds.maxY + bounds.minY) / 2;
+  const diam = Math.hypot(w, h);
+  const s = (Math.min(width, height) - 12) / diam;
+
+  ctx.save();
+  ctx.translate(width / 2, height / 2);
+  if (me) {
+    // Rotate so the player's heading points to the top of the minimap.
+    ctx.rotate(-me.h - Math.PI / 2);
+  }
+  // Track is drawn centred on the camera (player) when known, else on the
+  // track centre.
+  const focusX = me ? me.x : cx;
+  const focusY = me ? me.y : cy;
+  ctx.translate(-focusX * s, -focusY * s);
+
   ctx.strokeStyle = 'rgba(255,255,255,0.35)';
   ctx.lineWidth = 1.5;
   ctx.beginPath();
   for (let i = 0; i <= track.centerline.length; i++) {
     const p = track.centerline[i % track.centerline.length] as { x: number; y: number };
-    const xx = p.x * s + ox;
-    const yy = p.y * s + oy;
+    const xx = p.x * s;
+    const yy = p.y * s;
     if (i === 0) ctx.moveTo(xx, yy);
     else ctx.lineTo(xx, yy);
   }
   ctx.stroke();
-  const last = state.snapshots[state.snapshots.length - 1];
-  if (!last) return;
-  for (const ship of last.ships) {
-    const isMe = ship.id === state.myId;
-    const ko = (ship.f & FLAG_KO) !== 0;
-    ctx.fillStyle = isMe
-      ? '#fff'
-      : ko
-        ? 'rgba(120,120,120,0.5)'
-        : state.players[ship.id]?.color ?? '#888';
-    ctx.globalAlpha = ko ? 0.4 : 1;
+  if (last) {
+    for (const ship of last.ships) {
+      const isMe = ship.id === state.myId;
+      const ko = (ship.f & FLAG_KO) !== 0;
+      ctx.fillStyle = isMe
+        ? '#fff'
+        : ko
+          ? 'rgba(120,120,120,0.5)'
+          : state.players[ship.id]?.color ?? '#888';
+      ctx.globalAlpha = ko ? 0.4 : 1;
+      ctx.beginPath();
+      ctx.arc(ship.x * s, ship.y * s, isMe ? 3 : 2, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.globalAlpha = 1;
+    }
+  }
+  ctx.restore();
+
+  // Draw a fixed "player marker" arrow at the centre, above the rotated map.
+  if (me) {
+    ctx.save();
+    ctx.translate(width / 2, height / 2);
+    ctx.fillStyle = '#fff';
+    ctx.strokeStyle = 'rgba(255, 58, 209, 0.9)';
+    ctx.lineWidth = 1;
     ctx.beginPath();
-    ctx.arc(ship.x * s + ox, ship.y * s + oy, isMe ? 3 : 2, 0, Math.PI * 2);
+    ctx.moveTo(0, -6);
+    ctx.lineTo(4, 4);
+    ctx.lineTo(-4, 4);
+    ctx.closePath();
     ctx.fill();
-    ctx.globalAlpha = 1;
+    ctx.stroke();
+    ctx.restore();
   }
 };
 

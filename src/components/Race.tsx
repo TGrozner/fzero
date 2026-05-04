@@ -18,8 +18,11 @@ type Props = {
 export function Race({ state, dispatch, socket, onLeave }: Props) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const minimapRef = useRef<HTMLCanvasElement | null>(null);
+  const wrapRef = useRef<HTMLDivElement | null>(null);
   const renderRef = useRef(new RenderState());
   const lastInputSentRef = useRef(0);
+  const lastPowerRef = useRef<number | null>(null);
+  const shakeUntilRef = useRef(0);
 
   const handlePress = (action: 'pause' | 'menu') => {
     if (action === 'pause') dispatch({ type: 'TOGGLE_PAUSE' });
@@ -68,6 +71,23 @@ export function Race({ state, dispatch, socket, onLeave }: Props) {
       const input = keyboardToInput(k);
       socket.send({ type: 'input', ts: now, in: encodeInput(input) });
     }
+
+    // Detect collision damage on the local ship: a sudden power drop triggers shake.
+    const me = findMyShip(state);
+    if (me) {
+      const prev = lastPowerRef.current;
+      if (prev !== null && prev - me.p > 0.04 && now > shakeUntilRef.current) {
+        // Trigger shake by toggling the class on the wrap.
+        if (wrapRef.current) {
+          wrapRef.current.classList.remove('shake');
+          // Force reflow so the animation restarts even on rapid hits.
+          void wrapRef.current.offsetWidth;
+          wrapRef.current.classList.add('shake');
+          shakeUntilRef.current = now + 220;
+        }
+      }
+      lastPowerRef.current = me.p;
+    }
   }, true);
 
   // Periodic ping for RTT measurement.
@@ -83,7 +103,7 @@ export function Race({ state, dispatch, socket, onLeave }: Props) {
   const showCountdown = state.phase === 'COUNTDOWN';
 
   return (
-    <div className="canvas-wrap" data-testid="race-screen">
+    <div className="canvas-wrap" data-testid="race-screen" ref={wrapRef}>
       <canvas ref={canvasRef} />
       <canvas ref={minimapRef} className="minimap" data-testid="minimap" />
       <HUD state={state} />

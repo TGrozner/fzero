@@ -12,6 +12,9 @@ export function HUD({ state }: Props) {
   if (!ship) return null;
   const power = Math.max(0, ship.p);
   const ko = Math.max(0, ship.k);
+  const koReady = ko >= 0.999;
+  // Power class for color/pulse hints when low.
+  const powerLow = power < 0.25;
   return (
     <div className="hud" data-testid="hud">
       <div className="hud-top">
@@ -33,13 +36,21 @@ export function HUD({ state }: Props) {
       <div className="hud-bar">
         <div>
           <div className="meter-label">Power</div>
-          <div className="meter power" data-testid="power-meter">
+          <div
+            className={`meter power${powerLow ? ' meter-low' : ''}`}
+            data-testid="power-meter"
+          >
             <div className="fill" style={{ width: `${(power * 100).toFixed(1)}%` }} />
           </div>
         </div>
         <div>
-          <div className="meter-label">KO Meter</div>
-          <div className="meter ko" data-testid="ko-meter">
+          <div className="meter-label">
+            KO Meter {koReady && <span className="meter-ready">SKYWAY READY</span>}
+          </div>
+          <div
+            className={`meter ko${koReady ? ' meter-ready-glow' : ''}`}
+            data-testid="ko-meter"
+          >
             <div className="fill" style={{ width: `${(ko * 100).toFixed(1)}%` }} />
           </div>
         </div>

@@ -199,6 +199,52 @@ canvas {
   background: linear-gradient(90deg, #3affe1, #ff3ad1);
 }
 
+.meter.meter-ready-glow {
+  border-color: var(--accent-2);
+  animation: ko-glow 0.9s ease-in-out infinite alternate;
+}
+
+.meter.meter-low {
+  animation: power-warn 0.5s ease-in-out infinite alternate;
+}
+
+.meter-ready {
+  display: inline-block;
+  margin-left: 8px;
+  color: var(--accent-2);
+  font-size: 10px;
+  letter-spacing: 0.18em;
+  animation: ko-text 0.6s ease-in-out infinite alternate;
+}
+
+@keyframes ko-glow {
+  from { box-shadow: 0 0 4px rgba(58, 255, 225, 0.4); }
+  to   { box-shadow: 0 0 18px rgba(58, 255, 225, 0.95), 0 0 28px rgba(255, 58, 209, 0.5); }
+}
+
+@keyframes power-warn {
+  from { box-shadow: 0 0 0px rgba(255, 64, 64, 0); }
+  to   { box-shadow: 0 0 14px rgba(255, 64, 64, 0.7); }
+}
+
+@keyframes ko-text {
+  from { opacity: 0.55; }
+  to   { opacity: 1; }
+}
+
+@keyframes shake {
+  0% { transform: translate(0, 0); }
+  20% { transform: translate(-4px, 2px); }
+  40% { transform: translate(3px, -3px); }
+  60% { transform: translate(-3px, -2px); }
+  80% { transform: translate(2px, 3px); }
+  100% { transform: translate(0, 0); }
+}
+
+.canvas-wrap.shake {
+  animation: shake 0.22s ease-out;
+}
+
 .meter-label {
   font-size: 10px;
   letter-spacing: 0.18em;
