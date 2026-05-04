@@ -81,9 +81,15 @@ export type ServerMessage =
       time: number;
       ships: ShipSnapshot[];
       racersLeft: number;
+      /**
+       * Bitmask of currently active pickups (pad index → bit). Up to 32 pads.
+       * Layout is derived deterministically from the trackId (see pickups.ts).
+       */
+      pk: number;
     }
   | { type: 'phase'; phase: RoomPhase; countdown?: number; startsIn?: number }
   | { type: 'ko'; id: string; by: string | null; time: number }
+  | { type: 'pickup'; idx: number; kind: 'boost' | 'heal' | 'mine'; vehicleId: string; time: number }
   | {
       type: 'results';
       standings: { id: string; position: number; finishTime: number | null; ko: boolean }[];

@@ -2,10 +2,11 @@ import type { ShipSnapshot } from '../../shared/protocol.ts';
 import { FLAG_FREE_BOOST, FLAG_KO, FLAG_SKYWAY } from '../../shared/protocol.ts';
 import type { Track } from '../../shared/track.ts';
 import { closestOnTrack, edgePoint } from '../../shared/track.ts';
-import { type ClientState } from '../state.ts';
+import { type ClientState, type PickupEvent } from '../state.ts';
 import { findTrack } from '../../shared/track.ts';
 import { type PlayerInfoMsg } from '../../shared/protocol.ts';
 import { lerpAngle, wrapAngle } from '../../shared/vec2.ts';
+import { defaultPickups, pickupWorldPos, type PickupSpec } from '../../shared/pickups.ts';
 
 export type RenderContext = {
   ctx: CanvasRenderingContext2D;
@@ -128,6 +129,19 @@ type ShipMemory = {
   koAt: number | null;
 };
 
+/** Cached pickup layout per track id. Computed lazily. */
+const pickupCache = new Map<string, { layout: PickupSpec[]; positions: { x: number; y: number }[] }>();
+const getPickupCache = (track: Track) => {
+  let entry = pickupCache.get(track.id);
+  if (!entry) {
+    const layout = defaultPickups(track);
+    const positions = layout.map((spec) => pickupWorldPos(track, spec));
+    entry = { layout, positions };
+    pickupCache.set(track.id, entry);
+  }
+  return entry;
+};
+
 /** Persistent render state: trails + camera heading + starfield + ship memories + particles. */
 export class RenderState {
   private trails = new Map<string, { x: number; y: number }[]>();
@@ -139,6 +153,14 @@ export class RenderState {
   private lastFrameMs: number | null = null;
   /** Performance.now() at which the local player triggered a spin attack. */
   private localSpinAt: number | null = null;
+  /** Highest `at` of pickup events already consumed for impact bursts. */
+  private lastPickupBurstAt = 0;
+  /** True when this RenderState has consumed a pickup event with this exact `at`. */
+  shouldConsumePickupEvent(ev: PickupEvent): boolean {
+    if (ev.at <= this.lastPickupBurstAt) return false;
+    this.lastPickupBurstAt = ev.at;
+    return true;
+  }
 
   /** Mark a local spin attack starting at `nowMs` (client-side prediction). */
   triggerLocalSpin(nowMs: number): void {
@@ -230,6 +252,57 @@ export class RenderState {
     });
   }
 
+  /**
+   * Spawn a burst of `count` particles around (x, y) with a per-attack feel.
+   * - 'spin' -> radial outward fan, white/yellow tint
+   * - 'side' -> directional sideways spray, cyan tint
+   * - 'pickup' -> upward shimmer, kind-coloured
+   */
+  spawnImpactBurst(
+    x: number,
+    y: number,
+    kind: 'spin' | 'side-left' | 'side-right' | 'pickup-boost' | 'pickup-heal' | 'pickup-mine',
+    count: number,
+  ): void {
+    if (this.particles.length > 600) return;
+    const colors: Record<typeof kind, string> = {
+      spin: '#fff5b8',
+      'side-left': '#3affe1',
+      'side-right': '#3affe1',
+      'pickup-boost': '#ffd23a',
+      'pickup-heal': '#3eff8b',
+      'pickup-mine': '#ff4040',
+    } as const;
+    for (let i = 0; i < count; i++) {
+      let vx = 0;
+      let vy = 0;
+      if (kind === 'spin') {
+        const a = (i / count) * Math.PI * 2 + Math.random() * 0.4;
+        const sp = 30 + Math.random() * 30;
+        vx = Math.cos(a) * sp;
+        vy = Math.sin(a) * sp;
+      } else if (kind === 'side-left' || kind === 'side-right') {
+        const sign = kind === 'side-right' ? 1 : -1;
+        vx = sign * (40 + Math.random() * 40);
+        vy = (Math.random() - 0.5) * 30;
+      } else {
+        // upward shimmer for pickups
+        vx = (Math.random() - 0.5) * 20;
+        vy = -20 - Math.random() * 30;
+      }
+      this.particles.push({
+        x,
+        y,
+        vx,
+        vy,
+        age: 0,
+        maxAge: 0.45 + Math.random() * 0.4,
+        color: colors[kind],
+        size: 1.5 + Math.random() * 2,
+      });
+    }
+  }
+
   stepParticles(dt: number): void {
     for (let i = this.particles.length - 1; i >= 0; i--) {
       const p = this.particles[i] as Particle;
@@ -287,6 +360,7 @@ export class RenderState {
     this.memories.clear();
     this.particles.length = 0;
     this.lastFrameMs = null;
+    this.lastPickupBurstAt = 0;
   }
 }
 
@@ -900,6 +974,22 @@ export const renderFrame = (
   const closest = closestOnTrack(track, { x: me.x, y: me.y });
   drawTrack(rc, track, cam, cfg, closest.segIdx);
 
+  // Pickups (active mask comes from the latest snapshot).
+  const lastSnap = state.snapshots[state.snapshots.length - 1];
+  const activeMask = lastSnap?.pk ?? 0;
+  drawPickups(rc, track, activeMask, cam, cfg, nowMs);
+
+  // Spawn pickup-event impact bursts at the consumed pad's world position.
+  for (const ev of state.pickupEvents) {
+    if (!rstate.shouldConsumePickupEvent(ev)) continue;
+    const cache = getPickupCache(track);
+    const p = cache.positions[ev.idx];
+    if (!p) continue;
+    const kind: 'pickup-boost' | 'pickup-heal' | 'pickup-mine' =
+      ev.kind === 'boost' ? 'pickup-boost' : ev.kind === 'heal' ? 'pickup-heal' : 'pickup-mine';
+    rstate.spawnImpactBurst(p.x, p.y, kind, 12);
+  }
+
   // Update ship memories once + spawn boost particles for boosting ships.
   const memMap = new Map<string, ReturnType<typeof rstate.updateShipMemory>>();
   for (const [id, s] of ships) {
@@ -997,6 +1087,54 @@ const drawSpeedFx = (
     ctx.moveTo(x0, y0);
     ctx.lineTo(x1, y1);
     ctx.stroke();
+  }
+};
+
+const drawPickups = (
+  rc: RenderContext,
+  track: Track,
+  activeMask: number,
+  cam: CamPose,
+  cfg: CamConfig,
+  nowMs: number,
+): void => {
+  const { ctx, width } = rc;
+  const cache = getPickupCache(track);
+  const pulse = 0.85 + 0.15 * Math.sin(nowMs * 0.006);
+  for (let i = 0; i < cache.layout.length; i++) {
+    const active = (activeMask & (1 << i)) !== 0;
+    if (!active) continue;
+    const spec = cache.layout[i] as PickupSpec;
+    const pos = cache.positions[i] as { x: number; y: number };
+    const proj = project(pos.x, pos.y, cam, cfg, width);
+    if (!proj.visible) continue;
+    const fa = fogAlpha(proj.depth);
+    if (fa <= 0.02) continue;
+    const r = Math.max(2.5, (cfg.focal * 6) / proj.depth) * pulse;
+    let fill = '#ffd23a';
+    let glyph = '>';
+    if (spec.kind === 'heal') {
+      fill = '#3eff8b';
+      glyph = '+';
+    } else if (spec.kind === 'mine') {
+      fill = '#ff4040';
+      glyph = 'x';
+    }
+    ctx.save();
+    ctx.globalAlpha = fa;
+    ctx.shadowColor = fill;
+    ctx.shadowBlur = Math.min(18, r * 1.4);
+    ctx.fillStyle = fill;
+    ctx.beginPath();
+    ctx.arc(proj.sx, proj.sy, r, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.shadowBlur = 0;
+    ctx.fillStyle = 'rgba(10, 5, 36, 0.9)';
+    ctx.font = `${Math.max(8, Math.round(r * 1.3))}px ui-sans-serif, system-ui`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(glyph, proj.sx, proj.sy + 1);
+    ctx.restore();
   }
 };
 

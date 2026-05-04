@@ -23,6 +23,13 @@ import {
   stepRace,
 } from './race.ts';
 import { findTrack, startingGrid, TRACKS, type Track } from './track.ts';
+import {
+  type PickupSpec,
+  applyPickups,
+  defaultPickups,
+  pickupWorldPos,
+} from './pickups.ts';
+import type { Vec2 } from './vec2.ts';
 import { botColor, botInput, botName, profileForId } from './bot.ts';
 import {
   type ServerMessage,
@@ -79,6 +86,12 @@ export class RoomCore {
   private snapAccumMs = 0;
   /** Snapshot emit interval (ms). */
   private readonly snapIntervalMs: number;
+  /** Authored pickup layout for the active track. */
+  pickupLayout: readonly PickupSpec[] = [];
+  /** Cached world-space positions, parallel to pickupLayout. */
+  private pickupPositions: Vec2[] = [];
+  /** raceTime at which each pickup re-activates; <= current means active. */
+  private pickupRespawnAt: number[] = [];
 
   /** Override the lobby auto-start delay (defaults to LOBBY_AUTOSTART_S). */
   lobbyAutoStartS: number = LOBBY_AUTOSTART_S;
@@ -100,6 +113,22 @@ export class RoomCore {
     this.config = buildRaceConfig(this.track, TOTAL_LAPS);
     this.snapIntervalMs = snapIntervalMs;
     if (lobbyAutoStartS !== undefined) this.lobbyAutoStartS = lobbyAutoStartS;
+    this.rebuildPickups();
+  }
+
+  private rebuildPickups(): void {
+    this.pickupLayout = defaultPickups(this.track);
+    this.pickupPositions = this.pickupLayout.map((spec) => pickupWorldPos(this.track, spec));
+    this.pickupRespawnAt = this.pickupLayout.map(() => 0);
+  }
+
+  /** Bitmask of currently-active pickups (bit i = pad i is alive). */
+  pickupActiveMask(): number {
+    let mask = 0;
+    for (let i = 0; i < this.pickupLayout.length && i < 32; i++) {
+      if ((this.pickupRespawnAt[i] ?? 0) <= this.raceTime) mask |= 1 << i;
+    }
+    return mask;
   }
 
   /** Add a human player. Returns the assigned player id and welcome message. */
@@ -196,6 +225,7 @@ export class RoomCore {
     this.lastHumanInputAt = 0;
     this.tick = 0;
     this.lastNTriggered = false;
+    this.rebuildPickups();
     return [
       { type: 'phase', phase: 'COUNTDOWN', countdown: this.countdown },
       { type: 'players', players: this.playerInfos() },
@@ -245,11 +275,33 @@ export class RoomCore {
       this.raceTime += dt;
       this.tick += 1;
       const result = stepRace(allVehicles, this.inputs, this.config, dt, this.raceTime);
-      // Update vehicles map.
-      for (const v of result.vehicles) this.vehicles.set(v.id, v);
+      // Pickup resolution after physics so positions reflect this frame.
+      const pk = applyPickups(
+        result.vehicles,
+        this.pickupLayout,
+        this.pickupPositions,
+        this.pickupRespawnAt,
+        this.raceTime,
+      );
+      this.pickupRespawnAt = pk.respawnAt;
+      for (const v of pk.vehicles) this.vehicles.set(v.id, v);
+      for (const hit of pk.hits) {
+        events.push({
+          type: 'pickup',
+          idx: hit.idx,
+          kind: hit.kind,
+          vehicleId: hit.vehicleId,
+          time: this.raceTime,
+        });
+      }
+      for (const koId of pk.kos) {
+        events.push({ type: 'ko', id: koId, by: null, time: this.raceTime });
+      }
+      // Subsequent steps use the post-pickup vehicles.
+      const postPickup = pk.vehicles;
       // Last-N boost?
       const lastN = maybeTriggerLastNBoost(
-        result.vehicles,
+        postPickup,
         this.raceTime,
         this.lastNTriggered,
       );
@@ -271,21 +323,21 @@ export class RoomCore {
         events.push({ type: 'phase', phase: 'FINISHED' });
         events.push({
           type: 'results',
-          standings: standings(result.vehicles).map((s) => ({
+          standings: standings(postPickup).map((s) => ({
             id: s.id,
             position: s.position,
             finishTime: s.finishTime,
             ko: s.ko,
           })),
         });
-      } else if (isRaceOver(result.vehicles, this.config.totalLaps)) {
+      } else if (isRaceOver(postPickup, this.config.totalLaps)) {
         this.phase = 'FINISHED';
         this.finishedFor = 0;
         finishedNow = true;
         events.push({ type: 'phase', phase: 'FINISHED' });
         events.push({
           type: 'results',
-          standings: standings(result.vehicles).map((s) => ({
+          standings: standings(postPickup).map((s) => ({
             id: s.id,
             position: s.position,
             finishTime: s.finishTime,
@@ -307,6 +359,7 @@ export class RoomCore {
           time: this.raceTime,
           ships: this.snapshotShips(),
           racersLeft: [...this.vehicles.values()].filter((v) => !v.ko && !v.finished).length,
+          pk: this.pickupActiveMask(),
         };
       }
     }
@@ -327,6 +380,7 @@ export class RoomCore {
     this.startsIn = -1;
     this.lastNTriggered = false;
     this.finishedFor = 0;
+    this.rebuildPickups();
   }
 
   playerInfos() {

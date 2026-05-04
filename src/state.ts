@@ -9,6 +9,15 @@ export type Snapshot = {
   readonly receivedAt: number;
   readonly ships: readonly ShipSnapshot[];
   readonly racersLeft: number;
+  /** Bitmask of active pickups. */
+  readonly pk: number;
+};
+
+export type PickupEvent = {
+  readonly idx: number;
+  readonly kind: 'boost' | 'heal' | 'mine';
+  readonly vehicleId: string;
+  readonly at: number;
 };
 
 export type Standing = {
@@ -43,6 +52,8 @@ export type ClientState = {
   error: string | null;
   /** KOs the local player has scored — retained briefly so the HUD can show them. */
   myKos: readonly { id: string; at: number }[];
+  /** Recent pickup events — retained briefly so the renderer can spawn FX. */
+  pickupEvents: readonly PickupEvent[];
 };
 
 export const buildInitialClientState = (): ClientState => ({
@@ -63,6 +74,7 @@ export const buildInitialClientState = (): ClientState => ({
   rttMs: null,
   error: null,
   myKos: [],
+  pickupEvents: [],
 });
 
 export type Action =
@@ -150,6 +162,7 @@ const applyServer = (
         receivedAt: now,
         ships: msg.ships,
         racersLeft: msg.racersLeft,
+        pk: msg.pk,
       };
       const snapshots = [...state.snapshots, snap].slice(-MAX_SNAPSHOTS);
       // Garbage collect stale myKos popups (older than 2s).
@@ -157,7 +170,22 @@ const applyServer = (
       const myKos = state.myKos.some((k) => k.at <= cutoff)
         ? state.myKos.filter((k) => k.at > cutoff)
         : state.myKos;
-      return { ...state, snapshots, racersLeft: msg.racersLeft, myKos };
+      const peCutoff = now - 800;
+      const pickupEvents = state.pickupEvents.some((e) => e.at <= peCutoff)
+        ? state.pickupEvents.filter((e) => e.at > peCutoff)
+        : state.pickupEvents;
+      return { ...state, snapshots, racersLeft: msg.racersLeft, myKos, pickupEvents };
+    }
+    case 'pickup': {
+      const peCutoff = now - 800;
+      const fresh = state.pickupEvents.filter((e) => e.at > peCutoff);
+      return {
+        ...state,
+        pickupEvents: [
+          ...fresh,
+          { idx: msg.idx, kind: msg.kind, vehicleId: msg.vehicleId, at: now },
+        ],
+      };
     }
     case 'ko': {
       // Drop popups older than 2s.

@@ -28,6 +28,7 @@ describe('encode/decode round-trip', () => {
         { id: 'a', x: 1, y: 2, h: 0.1, vx: 3, vy: 4, p: 1, k: 0, l: 0, a: 0, f: 0 },
       ],
       racersLeft: 99,
+      pk: 0,
     };
     expect(decodeServer(encode(msg))).toEqual(msg);
   });

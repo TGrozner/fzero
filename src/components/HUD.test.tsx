@@ -21,6 +21,7 @@ describe('HUD', () => {
           time: 12.5,
           receivedAt: 0,
           racersLeft: 87,
+          pk: 0,
           ships: [
             { id: 'p1', x: 0, y: 0, h: 0, vx: 0, vy: 0, p: 0.7, k: 0.3, l: 1, a: 100, f: 0 },
           ],

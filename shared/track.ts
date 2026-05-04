@@ -171,6 +171,30 @@ export const buildPeanutTrack = (samples: number): Vec2[] => {
   return pts;
 };
 
+/**
+ * Technical "chicane" track: oblong base with sharp lateral kicks at four
+ * positions. The kicks force tight in-out steering — different feel from the
+ * smooth oval / peanut tracks. Topology stays a simple loop (no self-cross).
+ */
+export const buildChicaneTrack = (samples: number): Vec2[] => {
+  const pts: Vec2[] = [];
+  for (let i = 0; i < samples; i++) {
+    const a = (i / samples) * Math.PI * 2;
+    // Base oval.
+    const baseR = 1 + 0.08 * Math.sin(2 * a);
+    const x = Math.cos(a) * 520 * baseR;
+    const y = Math.sin(a) * 320 * baseR;
+    // Two chicane bumps on the long sides — small lateral nudges that act as
+    // S-curves you have to thread.
+    const longSide = Math.abs(Math.sin(a));
+    const kick = Math.sin(6 * a) * 36 * longSide;
+    const nx = -Math.sin(a);
+    const ny = Math.cos(a);
+    pts.push(v2(x + nx * kick, y + ny * kick));
+  }
+  return pts;
+};
+
 export const edgePoint = (track: Track, segIdx: number, t: number, side: 1 | -1): Vec2 => {
   const a = track.centerline[segIdx % track.centerline.length] as Vec2;
   const b = track.centerline[(segIdx + 1) % track.centerline.length] as Vec2;
@@ -276,6 +300,7 @@ export const trackEdges = (
 export const TRACKS: readonly Track[] = [
   buildTrack('mute-avenue', 'Mute Avenue', buildOvalTrack(900, 540, 48, 0.18), 44, 4),
   buildTrack('big-blue', 'Big Blue', buildPeanutTrack(56), 50, 4),
+  buildTrack('port-town', 'Port Town', buildChicaneTrack(72), 38, 6),
 ];
 
 export const findTrack = (id: string): Track => {

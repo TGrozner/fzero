@@ -78,10 +78,22 @@ describe('reducer', () => {
         time: 1.5,
         racersLeft: 50,
         ships: [{ id: 'p1', x: 0, y: 0, h: 0, vx: 0, vy: 0, p: 1, k: 0, l: 0, a: 0, f: 0 }],
+        pk: 0xff,
       },
     });
     expect(s.snapshots.length).toBe(1);
     expect(s.racersLeft).toBe(50);
+    expect(s.snapshots[0]?.pk).toBe(0xff);
+  });
+
+  it('SERVER_MESSAGE pickup queues a transient event', () => {
+    const s = reducer(baseState(), {
+      type: 'SERVER_MESSAGE',
+      receivedAt: 200,
+      message: { type: 'pickup', idx: 3, kind: 'boost', vehicleId: 'p1', time: 1.2 },
+    });
+    expect(s.pickupEvents.length).toBe(1);
+    expect(s.pickupEvents[0]?.kind).toBe('boost');
   });
 
   it('SERVER_MESSAGE results moves to results view', () => {
@@ -161,6 +173,7 @@ describe('selectors', () => {
         time: 1,
         receivedAt: 0,
         racersLeft: 99,
+        pk: 0,
         ships: [
           { id: 'p1', x: 0, y: 0, h: 0, vx: 0, vy: 0, p: 1, k: 0, l: 0, a: 50, f: 0 },
           { id: 'p2', x: 0, y: 0, h: 0, vx: 0, vy: 0, p: 1, k: 0, l: 0, a: 200, f: 0 },

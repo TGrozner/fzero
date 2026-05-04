@@ -4,6 +4,7 @@ import {
   buildTrack,
   buildOvalTrack,
   buildPeanutTrack,
+  buildChicaneTrack,
   closestOnTrack,
   isOnTrack,
   tangentAt,
@@ -45,6 +46,16 @@ describe('oval/peanut shapes', () => {
 
   it('peanut has the requested sample count', () => {
     expect(buildPeanutTrack(20).length).toBe(20);
+  });
+
+  it('chicane has the requested sample count', () => {
+    expect(buildChicaneTrack(72).length).toBe(72);
+  });
+
+  it('chicane track is a valid loop', () => {
+    const t = buildTrack('c', 'C', buildChicaneTrack(72), 38, 6);
+    expect(t.length).toBeGreaterThan(0);
+    expect(t.checkpoints.length).toBe(6);
   });
 });
 
@@ -152,12 +163,14 @@ describe('lookahead and tangentAtArc', () => {
 });
 
 describe('TRACKS library', () => {
-  it('contains at least 2 tracks', () => {
-    expect(TRACKS.length).toBeGreaterThanOrEqual(2);
+  it('contains at least 3 tracks', () => {
+    expect(TRACKS.length).toBeGreaterThanOrEqual(3);
   });
 
   it('findTrack returns a known track', () => {
     expect(findTrack('mute-avenue').name).toBe('Mute Avenue');
+    expect(findTrack('big-blue').name).toBe('Big Blue');
+    expect(findTrack('port-town').name).toBe('Port Town');
   });
 
   it('findTrack throws for unknown id', () => {
