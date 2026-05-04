@@ -80,6 +80,10 @@ export class RoomCore {
 
   /** Override the lobby auto-start delay (defaults to LOBBY_AUTOSTART_S). */
   lobbyAutoStartS: number = LOBBY_AUTOSTART_S;
+  /** Seconds to keep the FINISHED phase before auto-resetting back to WAITING. */
+  finishedCooldownS = 8;
+  /** Time (s) the room has been in FINISHED phase. */
+  private finishedFor = 0;
 
   constructor(
     trackId: string = TRACKS[0]?.id ?? 'mute-avenue',
@@ -194,7 +198,13 @@ export class RoomCore {
     const events: ServerMessage[] = [];
     let finishedNow = false;
 
-    if (this.phase === 'WAITING') {
+    if (this.phase === 'FINISHED') {
+      this.finishedFor += dt;
+      if (this.finishedFor >= this.finishedCooldownS) {
+        this.resetToWaiting();
+        events.push({ type: 'phase', phase: 'WAITING' });
+      }
+    } else if (this.phase === 'WAITING') {
       if (this.startsIn >= 0) {
         this.startsIn = Math.max(0, this.startsIn - dt);
         if (this.startsIn === 0) {
@@ -240,6 +250,7 @@ export class RoomCore {
       // Race over?
       if (isRaceOver(result.vehicles, this.config.totalLaps)) {
         this.phase = 'FINISHED';
+        this.finishedFor = 0;
         finishedNow = true;
         events.push({ type: 'phase', phase: 'FINISHED' });
         events.push({
@@ -271,6 +282,21 @@ export class RoomCore {
     }
 
     return { snapshot, events, finishedNow };
+  }
+
+  /** Wipe race state and return to WAITING. Called automatically after FINISHED cooldown,
+   *  or by the DO wrapper when a fresh client tries to join a finished room. */
+  resetToWaiting(): void {
+    this.phase = 'WAITING';
+    this.players.clear();
+    this.vehicles.clear();
+    this.inputs.clear();
+    this.raceTime = 0;
+    this.tick = 0;
+    this.countdown = COUNTDOWN_S;
+    this.startsIn = -1;
+    this.lastNTriggered = false;
+    this.finishedFor = 0;
   }
 
   playerInfos() {

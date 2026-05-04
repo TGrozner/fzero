@@ -79,6 +79,13 @@ export class Room {
     if (upgrade?.toLowerCase() !== 'websocket') {
       return new Response('expected websocket', { status: 426 });
     }
+    // If the previous race is over, reset back to a fresh lobby + close any lingering sockets.
+    if (this.core.phase === 'FINISHED') {
+      for (const ws of this.state.getWebSockets()) {
+        try { ws.close(1000, 'race over'); } catch { /* ignore */ }
+      }
+      this.core.resetToWaiting();
+    }
     // Apply query overrides (only takes effect while WAITING).
     if (this.core.phase === 'WAITING') {
       const fast = url.searchParams.get('fast') === '1';
@@ -87,6 +94,7 @@ export class Room {
       if (track) {
         try {
           this.core = new RoomCore(track, 50, this.core.lobbyAutoStartS);
+          if (fast) this.core.lobbyAutoStartS = 2;
         } catch {
           // unknown track id — ignore and keep default
         }
