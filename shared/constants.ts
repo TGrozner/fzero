@@ -58,6 +58,22 @@ export const BOOST_SPEED_MULT = 1.6;
 /** Room phase strings. */
 export type RoomPhase = 'WAITING' | 'COUNTDOWN' | 'RACING' | 'FINISHED';
 
+/**
+ * Ship classes — three trade-off profiles. Tuned so each one has a clear
+ * niche on the existing tracks:
+ *   • speed: fastest top speed + hardest to turn, slightly less HP
+ *   • tank:  slowest but tightest steering and the most HP-on-impact margin
+ *   • balanced: middle of the road
+ */
+export type ShipClass = 'speed' | 'tank' | 'balanced';
+export const SHIP_CLASSES: readonly ShipClass[] = ['speed', 'tank', 'balanced'];
+export const DEFAULT_SHIP_CLASS: ShipClass = 'balanced';
+
+/** Perfect-start mechanic: full-throttle at the GO moment grants this much
+ *  free boost, replicating the F-Zero arcade-style rocket start. */
+export const PERFECT_START_WINDOW_S = 0.18;
+export const PERFECT_START_BOOST_S = 1.5;
+
 /** Default colors users can pick for their ship. */
 export const SHIP_COLORS: readonly string[] = [
   '#3aa0ff',

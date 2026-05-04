@@ -152,7 +152,7 @@ export const stepRace = (
           sideRight: false,
           skyway: false,
         };
-    const next = stepVehicle(v, input, config.track, dt, raceTime, config.params);
+    const next = stepVehicle(v, input, config.track, dt, raceTime);
     // While protected, freeze power at 1 — no off-track / wall damage either.
     return protect ? { ...next, power: 1, ko: false } : next;
   });

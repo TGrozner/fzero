@@ -1,4 +1,4 @@
-import type { RoomPhase } from '../shared/constants.ts';
+import type { RoomPhase, ShipClass } from '../shared/constants.ts';
 import type { PlayerInfoMsg, ServerMessage, ShipSnapshot } from '../shared/protocol.ts';
 
 export type ConnectionStatus = 'idle' | 'connecting' | 'connected' | 'closed' | 'error';
@@ -55,12 +55,16 @@ export type ClientState = {
   /** Server-assigned id for this client. */
   myId: string | null;
   trackId: string;
+  /** Selected ship class. */
+  cls: ShipClass;
   /** Optional room name (matchmaking key). Empty = lobby/default. */
   roomName: string;
   /** Master audio volume 0..1. */
   volume: number;
   /** Whether the synthwave background pad plays. */
   music: boolean;
+  /** Number of times the local player earned a perfect start (display). */
+  perfectStarts: number;
   phase: RoomPhase;
   countdown: number;
   startsIn: number;
@@ -92,9 +96,11 @@ export const buildInitialClientState = (): ClientState => ({
   color: '#3aa0ff',
   myId: null,
   trackId: 'mute-avenue',
+  cls: 'balanced',
   roomName: '',
   volume: 0.6,
   music: true,
+  perfectStarts: 0,
   phase: 'WAITING',
   countdown: 0,
   startsIn: -1,
@@ -116,6 +122,7 @@ export type Action =
   | { type: 'SET_COLOR'; color: string }
   | { type: 'SET_TRACK'; trackId: string }
   | { type: 'SET_ROOM'; roomName: string }
+  | { type: 'SET_CLASS'; cls: ShipClass }
   | { type: 'SET_VOLUME'; volume: number }
   | { type: 'SET_MUSIC'; music: boolean }
   | { type: 'CONNECTING' }
@@ -139,6 +146,8 @@ export const reducer = (state: ClientState, action: Action): ClientState => {
       return { ...state, trackId: action.trackId };
     case 'SET_ROOM':
       return { ...state, roomName: action.roomName };
+    case 'SET_CLASS':
+      return { ...state, cls: action.cls };
     case 'SET_VOLUME':
       return { ...state, volume: Math.max(0, Math.min(1, action.volume)) };
     case 'SET_MUSIC':
@@ -288,6 +297,12 @@ const applyServer = (
         view: 'results',
         phase: 'FINISHED',
       };
+    case 'perfect-start':
+      // Bump local counter only when it's the local player.
+      if (msg.id === state.myId) {
+        return { ...state, perfectStarts: state.perfectStarts + 1 };
+      }
+      return state;
     case 'pong':
       return { ...state, rttMs: now - msg.ts };
   }
@@ -309,6 +324,54 @@ export const myPosition = (state: ClientState): number | null => {
   const sorted = [...last.ships].sort((a, b) => b.a - a.a);
   const idx = sorted.findIndex((s) => s.id === state.myId);
   return idx >= 0 ? idx + 1 : null;
+};
+
+export type LeaderboardEntry = {
+  readonly position: number;
+  readonly id: string;
+  readonly name: string;
+  readonly color: string;
+  readonly bot: boolean;
+  /** Arc length gap to the leader (always >= 0). */
+  readonly gap: number;
+  /** True if this row is the local player. */
+  readonly isMe: boolean;
+  /** True for KO'd or finished ships (rendered dim). */
+  readonly inactive: boolean;
+};
+
+/**
+ * Compute the live race leaderboard from the latest snapshot.
+ * Returns the top N (default 3); if the local player isn't in the top N,
+ * their row is appended at the end with their actual position.
+ */
+export const liveLeaderboard = (
+  state: ClientState,
+  topN = 3,
+): LeaderboardEntry[] => {
+  const last = state.snapshots[state.snapshots.length - 1];
+  if (!last || last.ships.length === 0) return [];
+  const sorted = [...last.ships].sort((a, b) => b.a - a.a);
+  const leaderArc = sorted[0]?.a ?? 0;
+  const rows: LeaderboardEntry[] = sorted.map((s, i) => {
+    const player = state.players[s.id];
+    return {
+      position: i + 1,
+      id: s.id,
+      name: player?.name ?? s.id,
+      color: player?.color ?? '#888',
+      bot: player?.bot ?? true,
+      gap: Math.max(0, leaderArc - s.a),
+      isMe: s.id === state.myId,
+      inactive: (s.f & 4) !== 0 /* FLAG_KO */ || (s.f & 8) !== 0 /* FLAG_FINISHED */,
+    };
+  });
+  const top = rows.slice(0, topN);
+  const meIdx = rows.findIndex((r) => r.isMe);
+  if (meIdx >= topN) {
+    top.push(rows[meIdx] as LeaderboardEntry);
+  }
+  return top;
 };
 
 /** Find the id of the ship the spectator camera should follow (alive leader). */

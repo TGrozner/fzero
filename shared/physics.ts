@@ -14,13 +14,17 @@ import { closestOnTrack, type Track } from './track.ts';
 import {
   BOOST_HP_DRAIN_PER_S,
   BOOST_SPEED_MULT,
+  DEFAULT_SHIP_CLASS,
   OFF_TRACK_DAMAGE_PER_S,
+  type ShipClass,
   SKYWAY_SPEED_BONUS,
   WALL_DAMAGE_FACTOR,
 } from './constants.ts';
 
 export type Vehicle = {
   readonly id: string;
+  /** Ship class — drives PhysicsParams via paramsForClass. */
+  readonly cls: ShipClass;
   readonly pos: Vec2;
   readonly vel: Vec2;
   /** Heading in radians (0 = +x). */
@@ -92,8 +96,45 @@ export const DEFAULT_PARAMS: PhysicsParams = {
   wallRestitution: 0.4,
 };
 
-export const createVehicle = (id: string, pos: Vec2, heading: number): Vehicle => ({
+const SPEED_PARAMS: PhysicsParams = {
+  ...DEFAULT_PARAMS,
+  accel: 240,
+  maxSpeed: 320,
+  turnRate: 2.2,
+  lateralGrip: 5,
+};
+
+const TANK_PARAMS: PhysicsParams = {
+  ...DEFAULT_PARAMS,
+  accel: 200,
+  brake: 320,
+  maxSpeed: 250,
+  turnRate: 3.1,
+  lateralGrip: 7,
+  wallRestitution: 0.55,
+};
+
+/** Class → physics profile lookup. Pure. */
+export const paramsForClass = (cls: ShipClass): PhysicsParams => {
+  switch (cls) {
+    case 'speed':
+      return SPEED_PARAMS;
+    case 'tank':
+      return TANK_PARAMS;
+    case 'balanced':
+    default:
+      return DEFAULT_PARAMS;
+  }
+};
+
+export const createVehicle = (
+  id: string,
+  pos: Vec2,
+  heading: number,
+  cls: ShipClass = DEFAULT_SHIP_CLASS,
+): Vehicle => ({
   id,
+  cls,
   pos,
   vel: ZERO,
   heading,
@@ -118,14 +159,18 @@ const decelerate = (v: Vehicle, dt: number, params: PhysicsParams): Vehicle => {
   return { ...v, vel, pos };
 };
 
-/** Pure step: apply input + physics for `dt` seconds. */
+/**
+ * Pure step: apply input + physics for `dt` seconds.
+ * `params` defaults to the per-class profile so the caller doesn't need to
+ * know about classes; pass an explicit profile only for tests / overrides.
+ */
 export const stepVehicle = (
   v: Vehicle,
   input: VehicleInput,
   track: Track,
   dt: number,
   raceTime: number,
-  params: PhysicsParams = DEFAULT_PARAMS,
+  params: PhysicsParams = paramsForClass(v.cls),
 ): Vehicle => {
   if (v.ko || v.finished) {
     return decelerate(v, dt, params);

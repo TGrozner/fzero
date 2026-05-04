@@ -1,11 +1,12 @@
 import type { Action } from '../state.ts';
-import { SHIP_COLORS } from '../../shared/constants.ts';
+import { SHIP_CLASSES, SHIP_COLORS, type ShipClass } from '../../shared/constants.ts';
 import { TRACKS } from '../../shared/track.ts';
 
 type Props = {
   pseudo: string;
   color: string;
   trackId: string;
+  cls: ShipClass;
   roomName: string;
   volume: number;
   music: boolean;
@@ -15,10 +16,17 @@ type Props = {
   busy: boolean;
 };
 
+const CLASS_INFO: Record<ShipClass, { label: string; tagline: string }> = {
+  speed: { label: 'Speed', tagline: 'Top speed +14%, slower turns, lighter HP' },
+  tank: { label: 'Tank', tagline: 'Tightest steering, sturdier walls, lower top speed' },
+  balanced: { label: 'Balanced', tagline: 'No-fuss baseline, best for new pilots' },
+};
+
 export function Menu({
   pseudo,
   color,
   trackId,
+  cls,
   roomName,
   volume,
   music,
@@ -58,6 +66,31 @@ export function Menu({
               style={{ background: c, color: c, padding: 0 }}
             />
           ))}
+        </div>
+      </div>
+      <div
+        className="row"
+        style={{ flexDirection: 'column', alignItems: 'stretch', gap: 6 }}
+        data-testid="class-picker"
+      >
+        <label>Ship class</label>
+        <div className="class-row">
+          {SHIP_CLASSES.map((c) => {
+            const info = CLASS_INFO[c];
+            return (
+              <button
+                key={c}
+                type="button"
+                data-testid={`class-${c}`}
+                aria-pressed={c === cls}
+                className={`class-chip${c === cls ? ' selected' : ''}`}
+                onClick={() => dispatch({ type: 'SET_CLASS', cls: c })}
+              >
+                <span className="class-label">{info.label}</span>
+                <span className="class-tagline">{info.tagline}</span>
+              </button>
+            );
+          })}
         </div>
       </div>
       <div className="row" style={{ flexDirection: 'column', alignItems: 'stretch', gap: 6 }}>

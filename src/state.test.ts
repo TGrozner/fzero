@@ -1,5 +1,12 @@
 import { describe, it, expect } from 'vitest';
-import { reducer, buildInitialClientState, findMyShip, myPosition, spectatorTargetId } from './state.ts';
+import {
+  reducer,
+  buildInitialClientState,
+  findMyShip,
+  myPosition,
+  spectatorTargetId,
+  liveLeaderboard,
+} from './state.ts';
 
 const baseState = () => buildInitialClientState();
 
@@ -48,8 +55,8 @@ describe('reducer', () => {
         countdown: 3,
         startsIn: 20,
         players: [
-          { id: 'p1', name: 'Tom', color: '#fff', bot: false },
-          { id: 'p2', name: 'Bob', color: '#000', bot: false },
+          { id: 'p1', name: 'Tom', color: '#fff', bot: false, cls: 'balanced' },
+          { id: 'p2', name: 'Bob', color: '#000', bot: false, cls: 'balanced' },
         ],
       },
     });
@@ -265,6 +272,40 @@ describe('selectors', () => {
   it('spectatorTargetId returns the alive ship with the highest arc length', () => {
     const s = stateWithSnapshot();
     expect(spectatorTargetId(s)).toBe('p2'); // higher arcLength
+  });
+
+  it('liveLeaderboard returns top-N sorted by arc length', () => {
+    const s = stateWithSnapshot();
+    const lb = liveLeaderboard(s, 3);
+    // p2 has arc 200, p1 has arc 50.
+    expect(lb.map((r) => r.id)).toEqual(['p2', 'p1']);
+    expect(lb[0]?.position).toBe(1);
+    expect(lb[0]?.gap).toBe(0);
+    expect(lb[1]?.gap).toBeGreaterThan(0);
+  });
+
+  it('liveLeaderboard pins the local player when outside the top N', () => {
+    const ships = [
+      { id: 'a', x: 0, y: 0, h: 0, vx: 0, vy: 0, p: 1, k: 0, l: 0, a: 1000, f: 0, sc: 0, dc: 0 },
+      { id: 'b', x: 0, y: 0, h: 0, vx: 0, vy: 0, p: 1, k: 0, l: 0, a: 900, f: 0, sc: 0, dc: 0 },
+      { id: 'c', x: 0, y: 0, h: 0, vx: 0, vy: 0, p: 1, k: 0, l: 0, a: 800, f: 0, sc: 0, dc: 0 },
+      { id: 'me', x: 0, y: 0, h: 0, vx: 0, vy: 0, p: 1, k: 0, l: 0, a: 100, f: 0, sc: 0, dc: 0 },
+    ];
+    const s = {
+      ...baseState(),
+      myId: 'me',
+      snapshots: [
+        { tick: 1, time: 1, receivedAt: 0, racersLeft: 4, pk: 0, ships },
+      ],
+    };
+    const lb = liveLeaderboard(s, 3);
+    expect(lb.map((r) => r.id)).toEqual(['a', 'b', 'c', 'me']);
+    expect(lb[3]?.position).toBe(4);
+    expect(lb[3]?.isMe).toBe(true);
+  });
+
+  it('liveLeaderboard returns empty list when no snapshots have arrived', () => {
+    expect(liveLeaderboard(baseState())).toEqual([]);
   });
 
   it('spectatorTargetId skips KO ships', () => {

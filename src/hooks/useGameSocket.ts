@@ -2,6 +2,7 @@ import { useEffect, useRef } from 'react';
 import { GameSocket, resolveServerUrl } from '../net/socket.ts';
 import type { Action } from '../state.ts';
 import type { ClientMessage } from '../../shared/protocol.ts';
+import type { ShipClass } from '../../shared/constants.ts';
 
 export type SocketAPI = {
   send: (msg: ClientMessage) => void;
@@ -37,6 +38,7 @@ export const useGameSocket = (
   pseudo: string,
   color: string,
   roomName: string,
+  cls: ShipClass,
 ): SocketAPI => {
   const ref = useRef<GameSocket | null>(null);
   const sessionRef = useRef<string>(getOrCreateSession());
@@ -69,6 +71,7 @@ export const useGameSocket = (
             type: 'hello',
             name: pseudo,
             color,
+            cls,
             session: sessionRef.current,
           });
         },
@@ -107,7 +110,7 @@ export const useGameSocket = (
       ref.current?.disconnect();
       ref.current = null;
     };
-  }, [enabled, trackId, pseudo, color, roomName, dispatch]);
+  }, [enabled, trackId, pseudo, color, roomName, cls, dispatch]);
 
   return {
     send: (msg) => ref.current?.send(msg),

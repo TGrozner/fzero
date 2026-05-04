@@ -833,6 +833,16 @@ const drawTrack = (
 
 const KO_ANIM_S = 1.6;
 
+/**
+ * Per-class body shape multipliers. Speed = thinner+longer, tank = wider+
+ * shorter, balanced = the original 1.0 baseline.
+ */
+const CLASS_BODY = {
+  speed: { wMul: 0.85, lMul: 1.15 },
+  tank: { wMul: 1.18, lMul: 0.92 },
+  balanced: { wMul: 1, lMul: 1 },
+} as const;
+
 const drawShip = (
   rc: RenderContext,
   cam: CamPose,
@@ -900,15 +910,20 @@ const drawShip = (
     ctx.shadowBlur = 12;
   }
 
-  // Body: arrow with a darker rear and a cockpit highlight.
+  // Body: arrow with a darker rear and a cockpit highlight. Per-class
+  // shape mul makes speed ships thin/long and tanks chunky/short.
+  const cls = (player?.cls ?? 'balanced') as keyof typeof CLASS_BODY;
+  const shape = CLASS_BODY[cls] ?? CLASS_BODY.balanced;
+  const w = size * shape.wMul;
+  const l = size * shape.lMul;
   ctx.fillStyle = ko ? '#3a3a3a' : color;
   ctx.beginPath();
-  ctx.moveTo(0, -size * 0.95);
-  ctx.lineTo(size * 0.75, size * 0.65);
-  ctx.lineTo(size * 0.32, size * 0.4);
-  ctx.lineTo(0, size * 0.55);
-  ctx.lineTo(-size * 0.32, size * 0.4);
-  ctx.lineTo(-size * 0.75, size * 0.65);
+  ctx.moveTo(0, -l * 0.95);
+  ctx.lineTo(w * 0.75, l * 0.65);
+  ctx.lineTo(w * 0.32, l * 0.4);
+  ctx.lineTo(0, l * 0.55);
+  ctx.lineTo(-w * 0.32, l * 0.4);
+  ctx.lineTo(-w * 0.75, l * 0.65);
   ctx.closePath();
   ctx.fill();
 
@@ -916,9 +931,9 @@ const drawShip = (
   if (!ko) {
     ctx.fillStyle = 'rgba(255, 255, 255, 0.55)';
     ctx.beginPath();
-    ctx.moveTo(0, -size * 0.55);
-    ctx.lineTo(size * 0.18, -size * 0.05);
-    ctx.lineTo(-size * 0.18, -size * 0.05);
+    ctx.moveTo(0, -l * 0.55);
+    ctx.lineTo(w * 0.18, -l * 0.05);
+    ctx.lineTo(-w * 0.18, -l * 0.05);
     ctx.closePath();
     ctx.fill();
   }
@@ -930,10 +945,10 @@ const drawShip = (
     ctx.shadowColor = '#fff';
     ctx.shadowBlur = 8;
     ctx.beginPath();
-    ctx.moveTo(0, -size * 0.95);
-    ctx.lineTo(size * 0.75, size * 0.65);
-    ctx.lineTo(0, size * 0.55);
-    ctx.lineTo(-size * 0.75, size * 0.65);
+    ctx.moveTo(0, -l * 0.95);
+    ctx.lineTo(w * 0.75, l * 0.65);
+    ctx.lineTo(0, l * 0.55);
+    ctx.lineTo(-w * 0.75, l * 0.65);
     ctx.closePath();
     ctx.stroke();
   }

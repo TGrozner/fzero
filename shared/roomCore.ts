@@ -1,12 +1,16 @@
 import { angleOf } from './vec2.ts';
 import {
   COUNTDOWN_S,
+  DEFAULT_SHIP_CLASS,
   LOBBY_AUTOSTART_S,
   MAX_RACERS,
   NO_INPUT_ABANDON_S,
+  PERFECT_START_BOOST_S,
   type RoomPhase,
   SERVER_SNAPSHOT_MS,
+  SHIP_CLASSES,
   SHIP_COLORS,
+  type ShipClass,
   TOTAL_LAPS,
 } from './constants.ts';
 import {
@@ -52,6 +56,7 @@ export type PlayerEntry = {
   readonly name: string;
   readonly color: string;
   readonly bot: boolean;
+  readonly cls: ShipClass;
   /**
    * Stable per-client session token. When a connection drops mid-race the
    * entry is converted to a bot but `session` is preserved so the same
@@ -154,6 +159,7 @@ export class RoomCore {
     name: string,
     color: string,
     session: string | null = null,
+    cls: ShipClass = DEFAULT_SHIP_CLASS,
   ): { id: string; welcome: ServerMessage; reconnected: boolean } {
     // Reconnection path: same session token, currently bot-piloted.
     if (session) {
@@ -189,12 +195,14 @@ export class RoomCore {
     const id = nextId('p');
     const safeName = sanitizeName(name) || `Pilot ${this.players.size + 1}`;
     const safeColor = SHIP_COLORS.includes(color) ? color : (SHIP_COLORS[0] as string);
+    const safeCls: ShipClass = SHIP_CLASSES.includes(cls) ? cls : DEFAULT_SHIP_CLASS;
     this.players.set(id, {
       id,
       connId,
       name: safeName,
       color: safeColor,
       bot: false,
+      cls: safeCls,
       session,
     });
     // Lobby auto-start: long timer when the first human shows up; shorten when a 2nd arrives.
@@ -258,12 +266,17 @@ export class RoomCore {
     // Fill bots.
     while (this.players.size < MAX_RACERS) {
       const id = nextId('b');
+      // Spread bots across the three classes deterministically from id hash.
+      // (botColor already uses a hash; here we use a smaller entropy source.)
+      const classIdx = id.charCodeAt(id.length - 1) % SHIP_CLASSES.length;
+      const cls = SHIP_CLASSES[classIdx] ?? DEFAULT_SHIP_CLASS;
       this.players.set(id, {
         id,
         connId: null,
         name: botName(id),
         color: botColor(id, SHIP_COLORS),
         bot: true,
+        cls,
         session: null,
       });
     }
@@ -274,7 +287,9 @@ export class RoomCore {
     for (let i = 0; i < ids.length; i++) {
       const pid = ids[i] as string;
       const pos = grid[i] ?? this.track.startPosition;
-      this.vehicles.set(pid, createVehicle(pid, pos, heading));
+      const entry = this.players.get(pid);
+      const cls = entry?.cls ?? DEFAULT_SHIP_CLASS;
+      this.vehicles.set(pid, createVehicle(pid, pos, heading, cls));
       this.inputs.set(pid, NEUTRAL_INPUT);
     }
     this.phase = 'COUNTDOWN';
@@ -318,6 +333,27 @@ export class RoomCore {
       if (this.countdown === 0) {
         this.phase = 'RACING';
         events.push({ type: 'phase', phase: 'RACING' });
+        // Perfect-start: any vehicle whose latest input has full throttle
+        // at the GO transition gets a free boost. We tag the vehicles
+        // directly here so the very first racing tick already applies the
+        // boost speed multiplier.
+        for (const v of this.vehicles.values()) {
+          const input = this.inputs.get(v.id);
+          // Accept any positive throttle (>= 0.7) — leaving some leeway for
+          // partial input quantisation. Bots may also get this if their
+          // throttle came in pre-GO.
+          if (input && input.throttle >= 0.7) {
+            this.vehicles.set(v.id, {
+              ...v,
+              freeBoostUntil: Math.max(v.freeBoostUntil, this.raceTime + PERFECT_START_BOOST_S),
+            });
+            events.push({
+              type: 'perfect-start',
+              id: v.id,
+              time: this.raceTime,
+            });
+          }
+        }
       }
     } else if (this.phase === 'RACING') {
       // Compute bot inputs from current state. Also surface the active
@@ -474,6 +510,7 @@ export class RoomCore {
       name: p.name,
       color: p.color,
       bot: p.bot,
+      cls: p.cls,
     }));
   }
 

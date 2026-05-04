@@ -142,6 +142,7 @@ export class Room {
           msg.name,
           msg.color,
           msg.session ?? null,
+          msg.cls,
         );
         // Replace attachment connId with playerId for fast input lookup.
         ws.serializeAttachment({ connId: att.connId } satisfies ConnAttachment);

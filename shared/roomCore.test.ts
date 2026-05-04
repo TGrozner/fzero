@@ -145,6 +145,45 @@ describe('RoomCore lifecycle', () => {
     expect(r.phase).toBe('FINISHED');
   });
 
+  it('grants perfect-start free boost to vehicles holding throttle at GO', () => {
+    const r = new RoomCore('mute-avenue', undefined, 0.5);
+    const { id } = r.addHuman('c1', 'A', '#3aa0ff');
+    r.startRace();
+    while (r.phase !== 'COUNTDOWN') r.step(1 / 30);
+    // Send full-throttle input BEFORE the GO transition.
+    r.applyInput('c1', {
+      throttle: 1,
+      steer: 0,
+      boost: false,
+      spin: false,
+      sideLeft: false,
+      sideRight: false,
+      skyway: false,
+    });
+    const events: string[] = [];
+    while ((r.phase as string) !== 'RACING') {
+      const out = r.step(1 / 30);
+      for (const ev of out.events) events.push(ev.type);
+    }
+    expect(events).toContain('perfect-start');
+    const v = r.vehicles.get(id);
+    expect(v?.freeBoostUntil).toBeGreaterThan(0);
+  });
+
+  it('does NOT grant perfect-start when no input was sent before GO', () => {
+    const r = new RoomCore('mute-avenue', undefined, 0.5);
+    const { id } = r.addHuman('c1', 'A', '#3aa0ff');
+    r.startRace();
+    const events: string[] = [];
+    while ((r.phase as string) !== 'RACING') {
+      const out = r.step(1 / 30);
+      for (const ev of out.events) events.push(ev.type);
+    }
+    expect(events).not.toContain('perfect-start');
+    const v = r.vehicles.get(id);
+    expect(v?.freeBoostUntil).toBe(0);
+  });
+
   it('lets a disconnected client reclaim its vehicle via session token', () => {
     const r = new RoomCore();
     const { id: pid } = r.addHuman('c1', 'Tom', '#3aa0ff', 'sess-1');

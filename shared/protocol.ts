@@ -1,4 +1,4 @@
-import type { RoomPhase } from './constants.ts';
+import type { RoomPhase, ShipClass } from './constants.ts';
 import type { Vec2 } from './vec2.ts';
 
 /** Compact ship state for snapshots. */
@@ -41,11 +41,12 @@ export type PlayerInfoMsg = {
   readonly name: string;
   readonly color: string;
   readonly bot: boolean;
+  readonly cls: ShipClass;
 };
 
 /** Client → Server messages. */
 export type ClientMessage =
-  | { type: 'hello'; name: string; color: string; session?: string }
+  | { type: 'hello'; name: string; color: string; cls?: ShipClass; session?: string }
   | { type: 'input'; ts: number; in: InputBits }
   | { type: 'ping'; ts: number };
 
@@ -114,6 +115,12 @@ export type ServerMessage =
       time: number;
     }
   | { type: 'pickup'; idx: number; kind: 'boost' | 'heal' | 'mine'; vehicleId: string; time: number }
+  | {
+      /** Fired at the GO transition for any vehicle that earned a perfect start. */
+      type: 'perfect-start';
+      id: string;
+      time: number;
+    }
   | {
       type: 'results';
       standings: { id: string; position: number; finishTime: number | null; ko: boolean }[];

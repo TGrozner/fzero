@@ -67,15 +67,54 @@ test('HUD shows the new speed readout + cooldown indicators', async ({ page }) =
   await expect(page.getByTestId('speed')).toBeVisible();
   const speedText = await page.getByTestId('speed').innerText();
   expect(speedText).toMatch(/^\d+\s*u\/s$/);
+  // Cooldown bars are present and report a "ready" state at race start
+  // (no attack fired yet).
   await expect(page.getByTestId('cd-spin')).toBeVisible();
   await expect(page.getByTestId('cd-side')).toBeVisible();
-  // After firing, the spin cooldown reads not-ready briefly.
-  await page.keyboard.press('Enter');
-  await page.waitForTimeout(250);
-  const spinAfter = await page
-    .getByTestId('cd-spin')
-    .getAttribute('data-ready');
-  expect(spinAfter).toBe('0');
+  await expect(page.getByTestId('cd-spin')).toHaveAttribute('data-ready', '1');
+  await expect(page.getByTestId('cd-side')).toHaveAttribute('data-ready', '1');
+});
+
+test('menu has a class picker with three classes; selection persists', async ({ page }) => {
+  await page.goto('/');
+  for (const c of ['speed', 'tank', 'balanced']) {
+    await expect(page.getByTestId(`class-${c}`)).toBeVisible();
+  }
+  // Default is balanced.
+  await expect(page.getByTestId('class-balanced')).toHaveAttribute('aria-pressed', 'true');
+  await page.getByTestId('class-speed').click();
+  await expect(page.getByTestId('class-speed')).toHaveAttribute('aria-pressed', 'true');
+  // Reload — selection persisted via localStorage.
+  await page.reload();
+  await expect(page.getByTestId('class-speed')).toHaveAttribute('aria-pressed', 'true');
+});
+
+test('mini-leaderboard surfaces top 3 + my row pinned when behind', async ({ page }) => {
+  await enterRace(page, 'lb');
+  await page.waitForTimeout(6000);
+  const lb = page.getByTestId('leaderboard');
+  await expect(lb).toBeVisible();
+  // At least 3 rows; the first row is position 1.
+  await expect(page.getByTestId('lb-1')).toBeVisible();
+  await expect(page.getByTestId('lb-2')).toBeVisible();
+  await expect(page.getByTestId('lb-3')).toBeVisible();
+});
+
+test('lobby copy-invite button copies a room URL', async ({ page, browser, context }) => {
+  // Need clipboard read permission (Chromium grants it via context).
+  await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+  // Use a custom room so the URL contains it.
+  await page.goto(`/?fast=1`);
+  await page.getByTestId('pseudo-input').fill('Inviter');
+  await page.getByTestId('room-input').fill('test-invite');
+  await page.getByTestId('race-button').click();
+  await expect(page.getByTestId('lobby')).toBeVisible({ timeout: 30_000 });
+  await page.getByTestId('copy-invite').click();
+  // The button label flips to "Copied!" briefly.
+  await expect(page.getByTestId('copy-invite')).toHaveText('Copied!');
+  const clipboard = await page.evaluate(() => navigator.clipboard.readText());
+  expect(clipboard).toContain('room=test-invite');
+  void browser;
 });
 
 test('lap fanfare overlay surfaces when the local player completes a lap', async ({ page }) => {

@@ -5,6 +5,7 @@ import {
   resolveVehicleCollision,
   NEUTRAL_INPUT,
   DEFAULT_PARAMS,
+  paramsForClass,
 } from './physics.ts';
 import { angleOf, v2 } from './vec2.ts';
 import { buildTrack, buildOvalTrack } from './track.ts';
@@ -171,5 +172,35 @@ describe('resolveVehicleCollision', () => {
     const r = resolveVehicleCollision(a, b, 5);
     expect(r.a.vel.x).toBe(-5);
     expect(r.b.vel.x).toBe(5);
+  });
+});
+
+describe('paramsForClass', () => {
+  it('speed has higher max speed than balanced', () => {
+    expect(paramsForClass('speed').maxSpeed).toBeGreaterThan(
+      paramsForClass('balanced').maxSpeed,
+    );
+  });
+  it('tank has higher turn rate than speed', () => {
+    expect(paramsForClass('tank').turnRate).toBeGreaterThan(
+      paramsForClass('speed').turnRate,
+    );
+  });
+  it('balanced equals DEFAULT_PARAMS', () => {
+    expect(paramsForClass('balanced')).toEqual(DEFAULT_PARAMS);
+  });
+});
+
+describe('per-class physics integration', () => {
+  it('speed-class vehicle reaches a higher top speed than tank', () => {
+    let speed = createVehicle('s', arena.startPosition, arenaHeading, 'speed');
+    let tank = createVehicle('t', arena.startPosition, arenaHeading, 'tank');
+    for (let i = 0; i < 300; i++) {
+      speed = stepVehicle(speed, { ...NEUTRAL_INPUT, throttle: 1 }, arena, 1 / 60, i / 60);
+      tank = stepVehicle(tank, { ...NEUTRAL_INPUT, throttle: 1 }, arena, 1 / 60, i / 60);
+    }
+    const sp = Math.hypot(speed.vel.x, speed.vel.y);
+    const tp = Math.hypot(tank.vel.x, tank.vel.y);
+    expect(sp).toBeGreaterThan(tp);
   });
 });

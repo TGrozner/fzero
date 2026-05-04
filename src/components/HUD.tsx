@@ -1,4 +1,4 @@
-import { findMyShip, type ClientState, myPosition } from '../state.ts';
+import { findMyShip, type ClientState, myPosition, liveLeaderboard } from '../state.ts';
 import {
   MAX_RACERS,
   SIDE_ATTACK_COOLDOWN_S,
@@ -43,6 +43,7 @@ export function HUD({ state }: Props) {
         Racers
         <span className="count" data-testid="racers-left">{state.racersLeft}</span>
       </div>
+      <Leaderboard state={state} />
       <div className="hud-bar">
         <div>
           <div className="meter-label">Power</div>
@@ -84,6 +85,32 @@ export function HUD({ state }: Props) {
     </div>
   );
 }
+
+const Leaderboard = ({ state }: { state: ClientState }): React.JSX.Element | null => {
+  const rows = liveLeaderboard(state, 3);
+  if (rows.length === 0) return null;
+  return (
+    <div className="mini-leaderboard" data-testid="leaderboard">
+      {rows.map((r, i) => {
+        const isPinned = i === rows.length - 1 && r.position > 3;
+        return (
+          <div
+            key={r.id}
+            className={`lb-row${r.isMe ? ' me' : ''}${r.inactive ? ' inactive' : ''}${isPinned ? ' pinned' : ''}`}
+            data-testid={`lb-${r.position}`}
+          >
+            <span className="lb-pos">{r.position}</span>
+            <span className="lb-color" style={{ background: r.color }} />
+            <span className="lb-name">{r.name}</span>
+            <span className="lb-gap">
+              {i === 0 ? '—' : `−${Math.round(r.gap)}m`}
+            </span>
+          </div>
+        );
+      })}
+    </div>
+  );
+};
 
 const Cooldown = ({
   label,

@@ -39,6 +39,7 @@ export function Race({ state, dispatch, socket, onLeave }: Props) {
   const [damageFlash, setDamageFlash] = useState<number>(0);
   const [lapFanfare, setLapFanfare] = useState<{ id: number; lap: number } | null>(null);
   const [positionToast, setPositionToast] = useState<{ id: number; pos: number; dir: 'up' | 'down' } | null>(null);
+  const [perfectStart, setPerfectStart] = useState<{ id: number } | null>(null);
   const fxIdRef = useRef(0);
   // SFX bookkeeping refs.
   const lastCountdownTickRef = useRef<number | null>(null);
@@ -48,6 +49,7 @@ export function Race({ state, dispatch, socket, onLeave }: Props) {
   const lastLapRef = useRef<number | null>(null);
   const lastPositionRef = useRef<number | null>(null);
   const lastFinishedRef = useRef(false);
+  const lastPerfectStartCountRef = useRef(0);
   const profileEnabled =
     typeof window !== 'undefined' &&
     new URLSearchParams(window.location.search).get('profile') === '1';
@@ -288,6 +290,16 @@ export function Race({ state, dispatch, socket, onLeave }: Props) {
       mixer.play('countdown-go');
       lastCountdownTickRef.current = null;
     }
+    // Perfect-start banner + chime when our `perfectStarts` counter ticks.
+    if (state.perfectStarts > lastPerfectStartCountRef.current) {
+      lastPerfectStartCountRef.current = state.perfectStarts;
+      const id = ++fxIdRef.current;
+      mixer.play('finish', 0.7);
+      setPerfectStart({ id });
+      window.setTimeout(() => {
+        setPerfectStart((cur) => (cur && cur.id === id ? null : cur));
+      }, 1200);
+    }
     // KO sounds — local KO is a special heavy "ko" SFX.
     for (const ko of state.koLog) {
       if (ko.time <= lastConsumedKoAtRef.current) continue;
@@ -453,6 +465,12 @@ export function Race({ state, dispatch, socket, onLeave }: Props) {
       {lapFanfare && (
         <div className="fx-lap" data-testid="fx-lap" key={lapFanfare.id}>
           LAP {lapFanfare.lap} / 3
+        </div>
+      )}
+      {/* Perfect-start banner. */}
+      {perfectStart && (
+        <div className="fx-perfect" data-testid="fx-perfect" key={perfectStart.id}>
+          PERFECT START!
         </div>
       )}
       {/* Position-change toast when the local player overtakes. */}
