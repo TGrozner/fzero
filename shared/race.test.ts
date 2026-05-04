@@ -153,7 +153,8 @@ describe('stepRace', () => {
       ['a', { ...NEUTRAL_INPUT, spin: true }],
     ]);
     const r = stepRace([attacker, victim], inputs, config, 1 / 30, 5);
-    expect(r.kos).toContain('b');
+    expect(r.kos.map((k) => k.id)).toContain('b');
+    expect(r.kos.find((k) => k.id === 'b')?.by).toBe('a');
   });
 
   it('applies skyway when input requested and KO meter full', () => {

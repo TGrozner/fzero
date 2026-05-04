@@ -249,8 +249,8 @@ export class RoomCore {
         for (const v of lastN.vehicles) this.vehicles.set(v.id, v);
       }
       // KO events.
-      for (const koId of result.kos) {
-        events.push({ type: 'ko', id: koId, by: null, time: this.raceTime });
+      for (const ko of result.kos) {
+        events.push({ type: 'ko', id: ko.id, by: ko.by, time: this.raceTime });
       }
       // Race over?
       if (isRaceOver(result.vehicles, this.config.totalLaps)) {

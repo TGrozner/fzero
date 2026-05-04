@@ -41,6 +41,8 @@ export type ClientState = {
   rttMs: number | null;
   /** Last error to display in a banner. */
   error: string | null;
+  /** KOs the local player has scored — retained briefly so the HUD can show them. */
+  myKos: readonly { id: string; at: number }[];
 };
 
 export const buildInitialClientState = (): ClientState => ({
@@ -60,6 +62,7 @@ export const buildInitialClientState = (): ClientState => ({
   paused: false,
   rttMs: null,
   error: null,
+  myKos: [],
 });
 
 export type Action =
@@ -149,10 +152,22 @@ const applyServer = (
         racersLeft: msg.racersLeft,
       };
       const snapshots = [...state.snapshots, snap].slice(-MAX_SNAPSHOTS);
-      return { ...state, snapshots, racersLeft: msg.racersLeft };
+      // Garbage collect stale myKos popups (older than 2s).
+      const cutoff = now - 2000;
+      const myKos = state.myKos.some((k) => k.at <= cutoff)
+        ? state.myKos.filter((k) => k.at > cutoff)
+        : state.myKos;
+      return { ...state, snapshots, racersLeft: msg.racersLeft, myKos };
     }
-    case 'ko':
-      return state; // visual effects can derive from snapshot flags
+    case 'ko': {
+      // Drop popups older than 2s.
+      const cutoff = now - 2000;
+      const fresh = state.myKos.filter((k) => k.at > cutoff);
+      if (msg.by !== state.myId) {
+        return fresh.length === state.myKos.length ? state : { ...state, myKos: fresh };
+      }
+      return { ...state, myKos: [...fresh, { id: msg.id, at: now }] };
+    }
     case 'results':
       return {
         ...state,

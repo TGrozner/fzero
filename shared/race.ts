@@ -126,13 +126,15 @@ export const maybeTriggerLastNBoost = (
  * 4. Update lap progression
  * 5. Activate skyway for vehicles whose input requested it (handled outside via tryActivateSkyway)
  */
+export type KoEvent = { id: string; by: string | null };
+
 export const stepRace = (
   vehicles: readonly Vehicle[],
   inputs: ReadonlyMap<string, VehicleInput>,
   config: RaceConfig,
   dt: number,
   raceTime: number,
-): { vehicles: Vehicle[]; kos: string[] } => {
+): { vehicles: Vehicle[]; kos: KoEvent[] } => {
   // During the spawn-protection window, strip all attack flags.
   const protect = raceTime < SPAWN_PROTECTION_S;
   let stepped = vehicles.map((v) => {
@@ -155,7 +157,7 @@ export const stepRace = (
     return protect ? { ...next, power: 1, ko: false } : next;
   });
 
-  const allKos: string[] = [];
+  const allKos: KoEvent[] = [];
 
   if (!protect) {
     for (let i = 0; i < stepped.length; i++) {
@@ -164,7 +166,7 @@ export const stepRace = (
       if (!input?.spin) continue;
       const result = applySpinAttack(attacker, stepped, raceTime);
       stepped = result.others.map((v) => (v.id === attacker.id ? result.attacker : v));
-      allKos.push(...result.kos);
+      for (const koId of result.kos) allKos.push({ id: koId, by: attacker.id });
     }
   }
 
@@ -191,10 +193,13 @@ export const stepRace = (
   // Lap progress.
   const finalVehicles = stepped.map((v) => updateLapProgress(v, config, raceTime));
 
-  // Detect KOs that happened during this step (power dropped to 0 in physics or wall).
+  // Detect KOs that happened during this step (power dropped to 0 in physics
+  // or wall) — these have no specific attacker.
   for (const v of finalVehicles) {
     const prev = vehicles.find((p) => p.id === v.id);
-    if (prev && !prev.ko && v.ko && !allKos.includes(v.id)) allKos.push(v.id);
+    if (prev && !prev.ko && v.ko && !allKos.some((k) => k.id === v.id)) {
+      allKos.push({ id: v.id, by: null });
+    }
   }
 
   return { vehicles: finalVehicles, kos: allKos };

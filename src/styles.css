@@ -245,6 +245,76 @@ canvas {
   animation: shake 0.22s ease-out;
 }
 
+/* Spin attack: brief radial flash from screen centre. */
+.fx-flash {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 40;
+  background: radial-gradient(circle at 50% 72%,
+    rgba(255, 255, 255, 0.7),
+    rgba(255, 255, 255, 0.15) 25%,
+    rgba(255, 255, 255, 0) 50%);
+  animation: fx-flash 0.24s ease-out;
+}
+@keyframes fx-flash {
+  from { opacity: 1; }
+  to   { opacity: 0; }
+}
+
+/* Side attack: an arc ring sweeping outward from the player. */
+.fx-side-ring {
+  position: absolute;
+  bottom: 22%;
+  width: 200px;
+  height: 200px;
+  pointer-events: none;
+  border: 4px solid rgba(58, 255, 225, 0.85);
+  border-radius: 50%;
+  z-index: 40;
+  transform-origin: center;
+  filter: drop-shadow(0 0 8px rgba(58, 255, 225, 0.6));
+  animation: fx-ring 0.32s ease-out;
+}
+.fx-side-ring.left {
+  left: calc(50% - 200px);
+  clip-path: polygon(0 0, 50% 0, 50% 100%, 0 100%);
+}
+.fx-side-ring.right {
+  right: calc(50% - 200px);
+  clip-path: polygon(50% 0, 100% 0, 100% 100%, 50% 100%);
+}
+@keyframes fx-ring {
+  from { opacity: 1; transform: scale(0.4); }
+  to   { opacity: 0; transform: scale(1.4); }
+}
+
+/* +1 KO popup floats up-left from below the racers-left HUD. */
+.fx-kos {
+  position: absolute;
+  top: 90px;
+  right: 26px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  pointer-events: none;
+  z-index: 50;
+}
+.fx-ko-pop {
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  color: #ffd23a;
+  text-shadow: 0 0 8px rgba(255, 210, 58, 0.9), 0 0 14px rgba(255, 58, 209, 0.6);
+  animation: fx-ko 1.6s ease-out forwards;
+}
+@keyframes fx-ko {
+  0%   { opacity: 0; transform: translateY(0px) scale(0.8); }
+  10%  { opacity: 1; transform: translateY(-8px) scale(1.15); }
+  30%  { opacity: 1; transform: translateY(-14px) scale(1); }
+  100% { opacity: 0; transform: translateY(-46px) scale(0.95); }
+}
+
 .meter-label {
   font-size: 10px;
   letter-spacing: 0.18em;

@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { type ClientState, type Action, findMyShip } from '../state.ts';
 import { useGameLoop } from '../hooks/useGameLoop.ts';
 import { useKeyboard, keyboardToInput } from '../hooks/useKeyboard.ts';
@@ -24,11 +24,40 @@ export function Race({ state, dispatch, socket, onLeave }: Props) {
   const lastPowerRef = useRef<number | null>(null);
   const shakeUntilRef = useRef(0);
 
+  const [spinFlash, setSpinFlash] = useState(false);
+  const [sideRing, setSideRing] = useState<-1 | 1 | null>(null);
+
   const handlePress = (action: 'pause' | 'menu') => {
     if (action === 'pause') dispatch({ type: 'TOGGLE_PAUSE' });
     if (action === 'menu') onLeave();
   };
   const keys = useKeyboard(true, handlePress);
+
+  // Predictive feedback on attack key presses. The server may ignore the
+  // input if the cooldown is still active, but the flash is harmless.
+  useEffect(() => {
+    let spinTimer: number | undefined;
+    let sideTimer: number | undefined;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.repeat) return;
+      if (e.code === 'Enter') {
+        setSpinFlash(true);
+        if (spinTimer) clearTimeout(spinTimer);
+        spinTimer = window.setTimeout(() => setSpinFlash(false), 240);
+      } else if (e.code === 'KeyQ' || e.code === 'KeyE') {
+        const dir: -1 | 1 = e.code === 'KeyQ' ? -1 : 1;
+        setSideRing(dir);
+        if (sideTimer) clearTimeout(sideTimer);
+        sideTimer = window.setTimeout(() => setSideRing(null), 320);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => {
+      window.removeEventListener('keydown', onKey);
+      if (spinTimer) clearTimeout(spinTimer);
+      if (sideTimer) clearTimeout(sideTimer);
+    };
+  }, []);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -128,6 +157,20 @@ export function Race({ state, dispatch, socket, onLeave }: Props) {
           </div>
         </div>
       )}
+      {/* Attack flash overlays (purely visual). */}
+      {spinFlash && <div className="fx-flash" data-testid="fx-spin" />}
+      {sideRing !== null && (
+        <div
+          className={`fx-side-ring ${sideRing === -1 ? 'left' : 'right'}`}
+          data-testid="fx-side"
+        />
+      )}
+      {/* +1 KO popups for KOs the local player scored. */}
+      <div className="fx-kos" data-testid="fx-kos">
+        {state.myKos.map((k) => (
+          <div key={`${k.id}-${k.at}`} className="fx-ko-pop">+1 KO</div>
+        ))}
+      </div>
       {state.rttMs !== null && (
         <div
           style={{

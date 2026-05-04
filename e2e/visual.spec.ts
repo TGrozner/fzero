@@ -162,6 +162,19 @@ test('WASD steering produces input messages without errors', async ({ page }) =>
   await page.screenshot({ path: `${SCREENSHOT_DIR}/race-after-inputs.png`, fullPage: false });
 });
 
+test('attack key presses surface visual FX overlays', async ({ page }) => {
+  await enterRace(page, 'fx');
+  await page.waitForTimeout(4000);
+
+  // Spin attack (Enter) → fx-spin briefly visible.
+  await page.keyboard.press('Enter');
+  await expect(page.getByTestId('fx-spin')).toBeVisible({ timeout: 500 });
+
+  // Side attack (Q) → fx-side visible briefly.
+  await page.keyboard.press('KeyQ');
+  await expect(page.getByTestId('fx-side')).toBeVisible({ timeout: 500 });
+});
+
 test('60fps target: at least 200 frames in 5 seconds of racing', async ({ page }) => {
   await enterRace(page, 'fps');
   await page.waitForTimeout(4000);

@@ -104,6 +104,51 @@ describe('reducer', () => {
     expect(s.paused).toBe(true);
     expect(reducer(s, { type: 'TOGGLE_PAUSE' }).paused).toBe(false);
   });
+
+  it('SERVER_MESSAGE ko adds an entry to myKos when by===myId', () => {
+    let s = reducer(baseState(), {
+      type: 'SERVER_MESSAGE',
+      receivedAt: 1000,
+      message: {
+        type: 'welcome',
+        yourId: 'p1',
+        track: 'mute-avenue',
+        phase: 'RACING',
+        countdown: 0,
+        startsIn: -1,
+        players: [],
+      },
+    });
+    s = reducer(s, {
+      type: 'SERVER_MESSAGE',
+      receivedAt: 1500,
+      message: { type: 'ko', id: 'b9', by: 'p1', time: 5 },
+    });
+    expect(s.myKos.length).toBe(1);
+    expect(s.myKos[0]?.id).toBe('b9');
+  });
+
+  it('SERVER_MESSAGE ko ignores other-player KOs', () => {
+    let s = reducer(baseState(), {
+      type: 'SERVER_MESSAGE',
+      receivedAt: 1000,
+      message: {
+        type: 'welcome',
+        yourId: 'p1',
+        track: 'mute-avenue',
+        phase: 'RACING',
+        countdown: 0,
+        startsIn: -1,
+        players: [],
+      },
+    });
+    s = reducer(s, {
+      type: 'SERVER_MESSAGE',
+      receivedAt: 1500,
+      message: { type: 'ko', id: 'b9', by: 'b3', time: 5 },
+    });
+    expect(s.myKos.length).toBe(0);
+  });
 });
 
 describe('selectors', () => {
