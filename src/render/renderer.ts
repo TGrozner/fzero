@@ -89,12 +89,34 @@ export const computeInterpolatedShips = (
   return out;
 };
 
-/** Persistent render state: trails + smoothed camera heading + starfield. */
+type Particle = {
+  x: number;
+  y: number;
+  vx: number;
+  vy: number;
+  age: number;
+  maxAge: number;
+  color: string;
+  size: number;
+};
+
+type ShipMemory = {
+  /** Last-known heading (for bank/turn-rate computation). */
+  prevHeading: number;
+  /** Smoothed bank angle (radians). */
+  bank: number;
+  /** Race time the ship's KO flag was first seen. null = alive. */
+  koAt: number | null;
+};
+
+/** Persistent render state: trails + camera heading + starfield + ship memories + particles. */
 export class RenderState {
   private trails = new Map<string, { x: number; y: number }[]>();
   private smoothedHeading: number | null = null;
-  /** Stars are sampled once and reused (parallax-fixed). */
   private stars: { x: number; y: number; r: number; tw: number }[] | null = null;
+  private memories = new Map<string, ShipMemory>();
+  private particles: Particle[] = [];
+  private lastFrameMs: number | null = null;
 
   updateTrails(ships: Map<string, { x: number; y: number }>) {
     for (const [id, pos] of ships) {
@@ -122,10 +144,78 @@ export class RenderState {
     return this.smoothedHeading;
   }
 
+  /** Returns smoothed bank for the ship (radians) given its current heading. */
+  updateShipMemory(
+    id: string,
+    heading: number,
+    isKo: boolean,
+    raceTime: number,
+    dtSec: number,
+  ): ShipMemory {
+    let mem = this.memories.get(id);
+    if (!mem) {
+      mem = { prevHeading: heading, bank: 0, koAt: isKo ? raceTime : null };
+      this.memories.set(id, mem);
+      return mem;
+    }
+    const headingDelta = wrapAngle(heading - mem.prevHeading);
+    // Bank target: -headingDelta proportional to angular speed (rad/s), capped.
+    const angVel = dtSec > 0 ? headingDelta / dtSec : 0;
+    const target = Math.max(-0.45, Math.min(0.45, angVel * 0.18));
+    mem.bank = mem.bank + (target - mem.bank) * 0.25;
+    mem.prevHeading = heading;
+    if (isKo && mem.koAt === null) mem.koAt = raceTime;
+    if (!isKo) mem.koAt = null;
+    return mem;
+  }
+
+  spawnBoostParticle(x: number, y: number, color: string): void {
+    if (this.particles.length > 350) return; // hard cap to keep perf bounded
+    this.particles.push({
+      x,
+      y,
+      vx: (Math.random() - 0.5) * 8,
+      vy: (Math.random() - 0.5) * 8,
+      age: 0,
+      maxAge: 0.6 + Math.random() * 0.3,
+      color,
+      size: 2 + Math.random() * 2,
+    });
+  }
+
+  stepParticles(dt: number): void {
+    for (let i = this.particles.length - 1; i >= 0; i--) {
+      const p = this.particles[i] as Particle;
+      p.age += dt;
+      if (p.age >= p.maxAge) {
+        this.particles.splice(i, 1);
+        continue;
+      }
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.vx *= 0.94;
+      p.vy *= 0.94;
+    }
+  }
+
+  particlesIter(): readonly Particle[] {
+    return this.particles;
+  }
+
+  /** Returns ms elapsed since last frame; first call returns 16. */
+  consumeDt(nowMs: number): number {
+    if (this.lastFrameMs === null) {
+      this.lastFrameMs = nowMs;
+      return 16;
+    }
+    const dt = nowMs - this.lastFrameMs;
+    this.lastFrameMs = nowMs;
+    return Math.min(100, dt);
+  }
+
   ensureStars(width: number, horizonY: number): { x: number; y: number; r: number; tw: number }[] {
     if (this.stars && this.stars.length > 0) return this.stars;
     const arr: { x: number; y: number; r: number; tw: number }[] = [];
-    // Deterministic-ish noise so stars don't change per frame.
     let s = 1337;
     const rng = () => {
       s = (s * 1103515245 + 12345) & 0x7fffffff;
@@ -147,6 +237,9 @@ export class RenderState {
     this.trails.clear();
     this.smoothedHeading = null;
     this.stars = null;
+    this.memories.clear();
+    this.particles.length = 0;
+    this.lastFrameMs = null;
   }
 }
 
@@ -489,6 +582,8 @@ const drawTrack = (
   }
 };
 
+const KO_ANIM_S = 1.6;
+
 const drawShip = (
   rc: RenderContext,
   cam: CamPose,
@@ -497,6 +592,8 @@ const drawShip = (
   player: PlayerInfoMsg | undefined,
   isMe: boolean,
   nowMs: number,
+  bank: number,
+  koElapsed: number,
 ): void => {
   const { ctx, width } = rc;
   const ko = (ship.flags & FLAG_KO) !== 0;
@@ -507,12 +604,21 @@ const drawShip = (
   const pivot = project(ship.x, ship.y, cam, cfg, width);
   if (!pivot.visible) return;
 
-  const fa = fogAlpha(pivot.depth);
-  if (fa <= 0.02) return;
+  const fa0 = fogAlpha(pivot.depth);
+  if (fa0 <= 0.02) return;
+
+  // KO fade-out: ship shrinks + spins + fades over KO_ANIM_S.
+  let koProgress = 0;
+  if (ko && koElapsed >= 0) {
+    koProgress = Math.min(1, koElapsed / KO_ANIM_S);
+    if (koProgress >= 1) return; // gone
+  }
+  const fa = fa0 * (1 - koProgress);
 
   const baseSize = isMe ? 22 : 17;
-  const size = Math.max(2.5, Math.min(baseSize, (cfg.focal * 2.4) / pivot.depth));
-  const relHeading = wrapAngle(ship.h - cam.heading);
+  let size = Math.max(2.5, Math.min(baseSize, (cfg.focal * 2.4) / pivot.depth));
+  if (ko) size *= 1 - koProgress * 0.6;
+  const relHeading = wrapAngle(ship.h - cam.heading) + (ko ? koElapsed * 6 : 0);
 
   // Ground shadow under the ship (an oval).
   ctx.save();
@@ -526,6 +632,9 @@ const drawShip = (
   ctx.save();
   ctx.translate(pivot.sx, pivot.sy);
   ctx.rotate(relHeading);
+  // Bank: slight horizontal squash that mimics rolling into a turn.
+  const bankScaleX = 1 - Math.abs(bank) * 0.5;
+  ctx.transform(bankScaleX, 0, bank * 0.4, 1, 0, 0);
   ctx.globalAlpha = fa;
 
   if (sky) {
@@ -643,14 +752,61 @@ export const renderFrame = (
   const closest = closestOnTrack(track, { x: me.x, y: me.y });
   drawTrack(rc, track, cam, cfg, closest.segIdx);
 
+  // Per-frame dt + race time for ship memory + particles.
+  const dtSec = rstate.consumeDt(nowMs) / 1000;
+  const raceTime = state.snapshots[state.snapshots.length - 1]?.time ?? 0;
+
+  // Update ship memories once + spawn boost particles for boosting ships.
+  const memMap = new Map<string, ReturnType<typeof rstate.updateShipMemory>>();
+  for (const [id, s] of ships) {
+    const isKo = (s.flags & FLAG_KO) !== 0;
+    memMap.set(id, rstate.updateShipMemory(id, s.h, isKo, raceTime, dtSec));
+    if (!isKo && (s.flags & FLAG_FREE_BOOST) !== 0) {
+      const back = 4;
+      const px = s.x - Math.cos(s.h) * back;
+      const py = s.y - Math.sin(s.h) * back;
+      const color = state.players[id]?.color ?? '#ffd23a';
+      rstate.spawnBoostParticle(px, py, color);
+    }
+  }
+  rstate.stepParticles(dtSec);
+
+  drawParticles(rc, rstate, cam, cfg);
+
   const projected = [...ships.entries()].map(([id, s]) => {
     const p = project(s.x, s.y, cam, cfg, width);
     return { id, ship: s, depth: p.depth };
   });
   projected.sort((a, b) => b.depth - a.depth);
   for (const { id, ship } of projected) {
-    drawShip(rc, cam, cfg, ship, state.players[id], id === state.myId, nowMs);
+    const mem = memMap.get(id);
+    if (!mem) continue;
+    const koElapsed = mem.koAt !== null ? raceTime - mem.koAt : -1;
+    drawShip(rc, cam, cfg, ship, state.players[id], id === state.myId, nowMs, mem.bank, koElapsed);
   }
+};
+
+const drawParticles = (
+  rc: RenderContext,
+  rstate: RenderState,
+  cam: CamPose,
+  cfg: CamConfig,
+): void => {
+  const { ctx, width } = rc;
+  for (const p of rstate.particlesIter()) {
+    const proj = project(p.x, p.y, cam, cfg, width);
+    if (!proj.visible) continue;
+    const fa = fogAlpha(proj.depth);
+    if (fa <= 0.02) continue;
+    const lifeLeft = 1 - p.age / p.maxAge;
+    const r = Math.max(0.5, (cfg.focal * p.size * 0.06) / proj.depth) * lifeLeft;
+    ctx.fillStyle = p.color;
+    ctx.globalAlpha = fa * lifeLeft * 0.7;
+    ctx.beginPath();
+    ctx.arc(proj.sx, proj.sy, r, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.globalAlpha = 1;
 };
 
 const drawOverview = (
