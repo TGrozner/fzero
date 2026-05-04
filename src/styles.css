@@ -289,6 +289,81 @@ canvas {
   to   { opacity: 0; transform: scale(1.4); }
 }
 
+/* Damage flash: red vignette pulse when the local player takes a hit. */
+.fx-damage {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 38;
+  background: radial-gradient(ellipse at center,
+    rgba(255, 0, 0, 0) 50%,
+    rgba(255, 0, 0, 0.55) 100%);
+  animation: fx-damage 0.32s ease-out;
+}
+@keyframes fx-damage {
+  from { opacity: 1; }
+  to   { opacity: 0; }
+}
+
+/* "+HIT" pop above the +KO popups, slightly smaller, cyan accent. */
+.fx-hits {
+  position: absolute;
+  top: 130px;
+  right: 26px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  pointer-events: none;
+  z-index: 50;
+}
+.fx-hit-pop {
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  color: var(--accent-2);
+  text-shadow: 0 0 6px rgba(58, 255, 225, 0.85), 0 0 10px rgba(58, 255, 225, 0.4);
+  animation: fx-ko 1.0s ease-out forwards;
+}
+
+/* Centred crosshair flash that confirms an attack landed on someone. */
+.fx-hitmarker {
+  position: absolute;
+  left: 50%;
+  top: 65%;
+  width: 36px;
+  height: 36px;
+  margin-left: -18px;
+  margin-top: -18px;
+  pointer-events: none;
+  z-index: 45;
+  animation: fx-hitmarker 0.42s ease-out;
+}
+.fx-hitmarker::before,
+.fx-hitmarker::after {
+  content: '';
+  position: absolute;
+  background: var(--accent-2);
+  box-shadow: 0 0 8px var(--accent-2), 0 0 14px rgba(58, 255, 225, 0.6);
+}
+.fx-hitmarker::before {
+  left: 50%;
+  top: 0;
+  width: 2px;
+  height: 100%;
+  margin-left: -1px;
+}
+.fx-hitmarker::after {
+  top: 50%;
+  left: 0;
+  height: 2px;
+  width: 100%;
+  margin-top: -1px;
+}
+@keyframes fx-hitmarker {
+  0%   { opacity: 1; transform: scale(0.6) rotate(0deg); }
+  100% { opacity: 0; transform: scale(1.4) rotate(45deg); }
+}
+
 /* +1 KO popup floats up-left from below the racers-left HUD. */
 .fx-kos {
   position: absolute;
