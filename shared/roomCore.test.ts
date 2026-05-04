@@ -130,4 +130,30 @@ describe('RoomCore lifecycle', () => {
     r.startRace();
     expect(() => r.addHuman('c2', 'B', '#ff4040')).toThrow();
   });
+
+  it('auto-abandons the race after the no-input timeout', () => {
+    const r = new RoomCore('mute-avenue', undefined, 0.5);
+    r.addHuman('c1', 'A', '#3aa0ff');
+    r.noInputAbandonS = 1; // shorter for test
+    r.startRace();
+    // Drive past countdown.
+    while ((r.phase as string) !== 'RACING') r.step(0.1);
+    // No input ever arrives — race auto-finishes once raceTime > 1.
+    for (let i = 0; i < 200 && (r.phase as string) !== 'FINISHED'; i++) {
+      r.step(0.05);
+    }
+    expect(r.phase).toBe('FINISHED');
+  });
+
+  it('auto-abandons immediately when last human leaves mid-race', () => {
+    const r = new RoomCore('mute-avenue', undefined, 0.5);
+    r.addHuman('c1', 'A', '#3aa0ff');
+    r.startRace();
+    while ((r.phase as string) !== 'RACING') r.step(0.1);
+    r.removeHuman('c1');
+    // After remove, the human is converted to a bot. Force a tick: the
+    // 'humansLeft === 0' branch should kick in.
+    r.step(0.1);
+    expect(r.phase).toBe('FINISHED');
+  });
 });

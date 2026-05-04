@@ -7,13 +7,16 @@ export const VEHICLE_RADIUS = 5;
 /** Number of laps in a race. */
 export const TOTAL_LAPS = 3;
 
-/** Server simulation tick rate. */
-export const SERVER_TICK_HZ = 30;
+/** Server simulation tick rate (alarm fires this often + snapshot is broadcast). */
+export const SERVER_TICK_HZ = 10;
 export const SERVER_TICK_MS = 1000 / SERVER_TICK_HZ;
 
-/** Server snapshot broadcast rate. */
-export const SERVER_SNAPSHOT_HZ = 20;
+/** Snapshot broadcast rate — aligned with the alarm tick so we emit one per fire. */
+export const SERVER_SNAPSHOT_HZ = SERVER_TICK_HZ;
 export const SERVER_SNAPSHOT_MS = 1000 / SERVER_SNAPSHOT_HZ;
+
+/** Race auto-abandons after this many seconds without any human input. */
+export const NO_INPUT_ABANDON_S = 60;
 
 /** Lobby auto-start delay after the second player joins (seconds). */
 export const LOBBY_AUTOSTART_S = 20;

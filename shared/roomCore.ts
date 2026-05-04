@@ -3,7 +3,9 @@ import {
   COUNTDOWN_S,
   LOBBY_AUTOSTART_S,
   MAX_RACERS,
+  NO_INPUT_ABANDON_S,
   type RoomPhase,
+  SERVER_SNAPSHOT_MS,
   SHIP_COLORS,
   TOTAL_LAPS,
 } from './constants.ts';
@@ -84,10 +86,14 @@ export class RoomCore {
   finishedCooldownS = 8;
   /** Time (s) the room has been in FINISHED phase. */
   private finishedFor = 0;
+  /** Race time of the most recent human input (used for idle abandon). */
+  private lastHumanInputAt = 0;
+  /** Seconds without any human input before the race auto-abandons. */
+  noInputAbandonS = NO_INPUT_ABANDON_S;
 
   constructor(
     trackId: string = TRACKS[0]?.id ?? 'mute-avenue',
-    snapIntervalMs = 50,
+    snapIntervalMs = SERVER_SNAPSHOT_MS,
     lobbyAutoStartS?: number,
   ) {
     this.track = findTrack(trackId);
@@ -156,6 +162,8 @@ export class RoomCore {
     const entry = [...this.players.values()].find((p) => p.connId === connId);
     if (!entry) return;
     this.inputs.set(entry.id, input);
+    // Track activity so we can auto-abandon idle rooms (DO requests aren't free).
+    if (!entry.bot) this.lastHumanInputAt = this.raceTime;
   }
 
   /** Force start the race (e.g. countdown auto-start). Fills with bots up to MAX_RACERS. */
@@ -185,6 +193,7 @@ export class RoomCore {
     this.phase = 'COUNTDOWN';
     this.countdown = COUNTDOWN_S;
     this.raceTime = 0;
+    this.lastHumanInputAt = 0;
     this.tick = 0;
     this.lastNTriggered = false;
     return [
@@ -252,8 +261,24 @@ export class RoomCore {
       for (const ko of result.kos) {
         events.push({ type: 'ko', id: ko.id, by: ko.by, time: this.raceTime });
       }
-      // Race over?
-      if (isRaceOver(result.vehicles, this.config.totalLaps)) {
+      // Auto-abandon: free DO budget when no human is interacting.
+      const humansLeft = [...this.players.values()].filter((p) => !p.bot).length;
+      const idleSecs = this.raceTime - this.lastHumanInputAt;
+      if (humansLeft === 0 || idleSecs > this.noInputAbandonS) {
+        this.phase = 'FINISHED';
+        this.finishedFor = 0;
+        finishedNow = true;
+        events.push({ type: 'phase', phase: 'FINISHED' });
+        events.push({
+          type: 'results',
+          standings: standings(result.vehicles).map((s) => ({
+            id: s.id,
+            position: s.position,
+            finishTime: s.finishTime,
+            ko: s.ko,
+          })),
+        });
+      } else if (isRaceOver(result.vehicles, this.config.totalLaps)) {
         this.phase = 'FINISHED';
         this.finishedFor = 0;
         finishedNow = true;

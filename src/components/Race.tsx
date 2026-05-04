@@ -93,8 +93,9 @@ export function Race({ state, dispatch, socket, onLeave }: Props) {
       }
     }
 
-    // Send input at ~30Hz.
-    if (state.phase === 'RACING' && state.myId && now - lastInputSentRef.current > 33) {
+    // Send input at the server tick rate (10Hz) — no point sending faster
+    // than the server processes, and each message costs a DO request.
+    if (state.phase === 'RACING' && state.myId && now - lastInputSentRef.current > 100) {
       lastInputSentRef.current = now;
       const k = keys.current;
       const input = keyboardToInput(k);
@@ -119,11 +120,11 @@ export function Race({ state, dispatch, socket, onLeave }: Props) {
     }
   }, true);
 
-  // Periodic ping for RTT measurement.
+  // Periodic ping for RTT measurement (10s — each ping is 2 DO requests).
   useEffect(() => {
     const interval = setInterval(() => {
       socket.send({ type: 'ping', ts: performance.now() });
-    }, 2000);
+    }, 10000);
     return () => clearInterval(interval);
   }, [socket]);
 
