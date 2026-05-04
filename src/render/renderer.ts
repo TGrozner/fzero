@@ -65,7 +65,6 @@ const MINIMAP_HEADING_DECAY = 6;
 /** Decay constant for the per-ship bank smoother (per second). */
 const SHIP_BANK_DECAY = 9;
 const INTERP_DELAY_MS = 80;
-const GRID_SIZE = 80;
 const FOG_START = 60;
 const FOG_END = 480;
 const STAR_COUNT = 80;
@@ -637,50 +636,6 @@ const drawSkylineLayer = (
   void opts.bandTop; // reserved for potential future band-clipping
 };
 
-/** Draw an infinite synthwave grid on the ground plane. */
-const drawGrid = (rc: RenderContext, cam: CamPose, cfg: CamConfig): void => {
-  const { ctx, width } = rc;
-  ctx.lineWidth = 1;
-  // World-axis-aligned grid lines around the camera.
-  const px = cam.posX;
-  const py = cam.posY;
-  const baseX = Math.floor(px / GRID_SIZE) * GRID_SIZE;
-  const baseY = Math.floor(py / GRID_SIZE) * GRID_SIZE;
-  const span = 12;
-  // Lines parallel to world Y axis (constant world X).
-  for (let i = -span; i <= span; i++) {
-    const wx = baseX + i * GRID_SIZE;
-    const a = { x: wx, y: py - GRID_SIZE * span };
-    const b = { x: wx, y: py + GRID_SIZE * span };
-    const seg = projectSegment(a.x, a.y, b.x, b.y, cam, cfg, width);
-    if (!seg) continue;
-    const minDepth = Math.min(seg.a.depth, seg.b.depth);
-    const alpha = fogAlpha(minDepth) * 0.6;
-    if (alpha <= 0.01) continue;
-    ctx.strokeStyle = `rgba(58, 255, 225, ${alpha * 0.4})`;
-    ctx.beginPath();
-    ctx.moveTo(seg.a.sx, seg.a.sy);
-    ctx.lineTo(seg.b.sx, seg.b.sy);
-    ctx.stroke();
-  }
-  // Lines parallel to world X axis (constant world Y).
-  for (let i = -span; i <= span; i++) {
-    const wy = baseY + i * GRID_SIZE;
-    const a = { x: px - GRID_SIZE * span, y: wy };
-    const b = { x: px + GRID_SIZE * span, y: wy };
-    const seg = projectSegment(a.x, a.y, b.x, b.y, cam, cfg, width);
-    if (!seg) continue;
-    const minDepth = Math.min(seg.a.depth, seg.b.depth);
-    const alpha = fogAlpha(minDepth) * 0.6;
-    if (alpha <= 0.01) continue;
-    ctx.strokeStyle = `rgba(255, 58, 209, ${alpha * 0.4})`;
-    ctx.beginPath();
-    ctx.moveTo(seg.a.sx, seg.a.sy);
-    ctx.lineTo(seg.b.sx, seg.b.sy);
-    ctx.stroke();
-  }
-};
-
 const drawTrack = (
   rc: RenderContext,
   track: Track,
@@ -1084,7 +1039,6 @@ export const renderFrame = (
   };
 
   drawSky(rc, rstate, cfg.horizonY, cam, nowMs);
-  drawGrid(rc, cam, cfg);
   const closest = closestOnTrack(track, { x: me.x, y: me.y });
   drawTrack(rc, track, cam, cfg, closest.segIdx);
 
