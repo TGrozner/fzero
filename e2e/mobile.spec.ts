@@ -28,7 +28,6 @@ test('mobile control overlay renders all expected buttons during racing', async 
   for (const tid of [
     'touch-left',
     'touch-right',
-    'touch-brake',
     'touch-spin',
     'touch-q',
     'touch-e',
@@ -38,6 +37,33 @@ test('mobile control overlay renders all expected buttons during racing', async 
     'touch-leave',
   ]) {
     await expect(page.getByTestId(tid)).toBeVisible();
+  }
+});
+
+test('left-thumb actions (Q + ◀ + SPIN) live in the bottom-left cluster', async ({ page }) => {
+  await startRace(page, `mobile-cluster-l-${Date.now().toString(36)}`);
+  await expect(page.getByTestId('touch-left')).toBeVisible({ timeout: 15_000 });
+  // All three should land in the left half of the viewport.
+  const vp = page.viewportSize();
+  expect(vp).not.toBeNull();
+  const midX = vp!.width / 2;
+  for (const tid of ['touch-left', 'touch-q', 'touch-spin']) {
+    const box = await page.getByTestId(tid).boundingBox();
+    expect(box, `${tid} bounding box`).toBeTruthy();
+    expect(box!.x + box!.width / 2, `${tid} centre x`).toBeLessThan(midX);
+  }
+});
+
+test('right-thumb actions (E + ▶ + BOOST + SKY) live in the bottom-right cluster', async ({ page }) => {
+  await startRace(page, `mobile-cluster-r-${Date.now().toString(36)}`);
+  await expect(page.getByTestId('touch-right')).toBeVisible({ timeout: 15_000 });
+  const vp = page.viewportSize();
+  expect(vp).not.toBeNull();
+  const midX = vp!.width / 2;
+  for (const tid of ['touch-right', 'touch-e', 'touch-boost', 'touch-skyway']) {
+    const box = await page.getByTestId(tid).boundingBox();
+    expect(box, `${tid} bounding box`).toBeTruthy();
+    expect(box!.x + box!.width / 2, `${tid} centre x`).toBeGreaterThan(midX);
   }
 });
 
@@ -59,18 +85,18 @@ test('the touch leave button on the race HUD ends the race', async ({ page }) =>
   await expect(page.getByTestId('menu')).toBeVisible();
 });
 
-test('steer buttons are at least 64 px (thumb-friendly) and action buttons too', async ({ page }) => {
+test('steer + boost are the largest buttons; bumps and utility are still thumb-friendly', async ({ page }) => {
   await startRace(page, `mobile-size-${Date.now().toString(36)}`);
   await expect(page.getByTestId('touch-boost')).toBeVisible({ timeout: 15_000 });
-  // Steer buttons are the dominant input and a touch larger.
-  for (const tid of ['touch-left', 'touch-right']) {
+  // The dominant inputs (turn-L, turn-R, BOOST) are the biggest at 84 px.
+  for (const tid of ['touch-left', 'touch-right', 'touch-boost']) {
     const box = await page.getByTestId(tid).boundingBox();
     expect(box, `${tid} bounding box`).toBeTruthy();
     expect(box!.width).toBeGreaterThanOrEqual(72);
     expect(box!.height).toBeGreaterThanOrEqual(72);
   }
-  // Action buttons.
-  for (const tid of ['touch-spin', 'touch-q', 'touch-e', 'touch-boost']) {
+  // Bumps + tap-fire utility — slightly smaller but still thumb-friendly.
+  for (const tid of ['touch-spin', 'touch-q', 'touch-e', 'touch-skyway']) {
     const box = await page.getByTestId(tid).boundingBox();
     expect(box, `${tid} bounding box`).toBeTruthy();
     expect(box!.width).toBeGreaterThanOrEqual(64);

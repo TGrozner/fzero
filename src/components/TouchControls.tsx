@@ -20,40 +20,42 @@ const haptic = (ms = 8): void => {
  * = 100 ms) so the server reliably observes a quick tap. With a sub-100 ms
  * tap on a touchscreen the keyboard's natural keydown/keyup gap of ~150 ms
  * is gone — without latching, fast taps slip through the cracks of the next
- * 100 ms input snapshot and the action never fires server-side. Hold-to-fire
- * actions (boost, steering, brake) clear immediately on release.
+ * 100 ms input snapshot and the action never fires server-side.
  */
 const TAP_FIRE_MIN_HOLD_MS = 150;
 const TAP_FIRE_ACTIONS = new Set<keyof KeyState>(['spin', 'sideLeft', 'sideRight', 'skyway']);
 
 /**
- * Touch / pointer control overlay. Renders ONLY on touch-primary devices
- * (see isTouchDevice). Layout, with safe-area insets respected:
+ * Touch / pointer control overlay. Renders ONLY on touch-primary devices.
+ * Two-thumb layout — each thumb owns its own corner of the screen and never
+ * has to leave its cluster to reach a button it cares about:
  *
- *   ┌──────────────────────────────────────────┐
- *   │ [⏸] [⨯]                          [SKY]   │
- *   │                                          │
- *   │                                          │
- *   │                                  [SPIN]  │
- *   │ [BRAKE]                          [Q] [E] │
- *   │ [ ◀ ] [ ▶ ]                      [BOOST] │
- *   └──────────────────────────────────────────┘
+ *   ┌──────────────────────────────────────────────┐
+ *   │ [⏸] [⨯]                                      │
+ *   │                                              │
+ *   │                                              │
+ *   │                                              │
+ *   │                                              │
+ *   │   [Q] [SPIN]                  [E] [SKY]      │
+ *   │   [◀]                         [▶] [BOOST]    │
+ *   └──────────────────────────────────────────────┘
  *
- * Throttle is auto-engaged for the entire lifetime of this overlay (which is
- * gated to RACING + !KO + !paused upstream), because casual mobile racers
- * just want to "go forward and steer". The brake button momentarily clears
- * the auto-throttle and applies negative throttle for those who want to slow
- * down for a tight corner.
+ * Left thumb owns LEFT-side actions (turn-L + bump-L), and SPIN sits
+ * naturally to the right of Q so a thumb roll up-and-over fires it. Right
+ * thumb owns RIGHT-side actions (turn-R + bump-R), with SKY in the same
+ * "top-right of cluster" slot symmetrical to SPIN, and BOOST adjacent to ▶
+ * so the most-used hold button is always under the resting thumb. Throttle
+ * is auto-engaged for the whole racing lifetime so the player just steers.
  *
- * Buttons fall into two categories:
- *   - HOLD-TO-FIRE (left, right, brake, boost) clear the bit on release.
+ * Button categories:
+ *   - HOLD-TO-FIRE (left, right, boost) clear the bit on release.
  *   - TAP-FIRE (spin, sideLeft, sideRight, skyway) latch the bit for 150 ms
  *     so the next 10 Hz server input snapshot reliably observes the press.
  */
 export function TouchControls({ input, onPause, onLeave }: Props) {
   // Auto-throttle on for the entire mounted lifetime. Race.tsx unmounts this
-  // overlay outside of active racing (paused / KO / spectator) so we don't
-  // accidentally pin "up=true" while in the wrong phase.
+  // overlay outside of active racing (paused / KO / spectator) so we never
+  // pin "up=true" while in the wrong phase.
   useEffect(() => {
     input.setAction('touch', 'up', true);
     return () => {
@@ -93,10 +95,14 @@ export function TouchControls({ input, onPause, onLeave }: Props) {
         </button>
       </div>
 
-      {/* Bottom-left: brake (small, secondary) + steer pair (big, primary). */}
-      <div className="touch-steer">
-        <BrakeBtn input={input} />
-        <div className="touch-steer-row">
+      {/* Bottom-left cluster — left thumb. Top row = bumps (Q) + spin (tap-
+          fire utility); bottom row = the big primary turn-L button. */}
+      <div className="touch-cluster touch-cluster-left">
+        <div className="touch-cluster-row">
+          <ActionBtn input={input} action="sideLeft" label="Q" testid="touch-q" />
+          <ActionBtn input={input} action="spin" label="SPIN" testid="touch-spin" />
+        </div>
+        <div className="touch-cluster-row">
           <ActionBtn
             input={input}
             action="left"
@@ -104,6 +110,18 @@ export function TouchControls({ input, onPause, onLeave }: Props) {
             testid="touch-left"
             className="touch-btn-steer"
           />
+        </div>
+      </div>
+
+      {/* Bottom-right cluster — right thumb. Top row = bump-R (E) + skyway;
+          bottom row = the big primary turn-R + boost (held adjacent so a
+          single thumb covers both during a boosted turn). */}
+      <div className="touch-cluster touch-cluster-right">
+        <div className="touch-cluster-row">
+          <ActionBtn input={input} action="sideRight" label="E" testid="touch-e" />
+          <ActionBtn input={input} action="skyway" label="SKY" testid="touch-skyway" />
+        </div>
+        <div className="touch-cluster-row">
           <ActionBtn
             input={input}
             action="right"
@@ -111,61 +129,18 @@ export function TouchControls({ input, onPause, onLeave }: Props) {
             testid="touch-right"
             className="touch-btn-steer"
           />
+          <ActionBtn
+            input={input}
+            action="boost"
+            label="BOOST"
+            testid="touch-boost"
+            className="touch-btn-boost"
+          />
         </div>
       </div>
-
-      {/* Bottom-right action buttons. */}
-      <div className="touch-buttons">
-        <ActionBtn input={input} action="spin" label="SPIN" testid="touch-spin" />
-        <div className="touch-row">
-          <ActionBtn input={input} action="sideLeft" label="◀ Q" testid="touch-q" />
-          <ActionBtn input={input} action="sideRight" label="E ▶" testid="touch-e" />
-        </div>
-        <ActionBtn input={input} action="boost" label="BOOST" testid="touch-boost" />
-      </div>
-
-      {/* Top-right Skyway. Server gates the actual effect on the KO meter. */}
-      <ActionBtn
-        input={input}
-        action="skyway"
-        label="SKY"
-        testid="touch-skyway"
-        className="touch-skyway-btn"
-      />
     </div>
   );
 }
-
-/**
- * Brake button — taps the user off the auto-throttle and applies negative
- * throttle for the duration of the press. Releasing snaps auto-throttle
- * back on (TouchControls' own useEffect set up=true on mount).
- */
-const BrakeBtn = ({ input }: { input: InputApi }) => {
-  const press = (e: React.PointerEvent<HTMLButtonElement>) => {
-    e.preventDefault();
-    haptic(6);
-    input.setAction('touch', 'up', false);
-    input.setAction('touch', 'down', true);
-  };
-  const release = () => {
-    input.setAction('touch', 'down', false);
-    input.setAction('touch', 'up', true);
-  };
-  return (
-    <button
-      type="button"
-      className="touch-btn touch-btn-brake"
-      data-testid="touch-brake"
-      onPointerDown={press}
-      onPointerUp={release}
-      onPointerCancel={release}
-      onPointerLeave={release}
-    >
-      BRAKE
-    </button>
-  );
-};
 
 const ActionBtn = ({
   input,

@@ -62,7 +62,6 @@ describe('TouchControls', () => {
     for (const tid of [
       'touch-left',
       'touch-right',
-      'touch-brake',
       'touch-spin',
       'touch-q',
       'touch-e',
@@ -73,6 +72,39 @@ describe('TouchControls', () => {
     ]) {
       expect(screen.getByTestId(tid)).toBeTruthy();
     }
+  });
+
+  it('does NOT render a brake button (auto-throttle is the only forward control)', () => {
+    const input = buildInput();
+    render(<TouchControls input={input} onPause={() => {}} onLeave={() => {}} />);
+    expect(screen.queryByTestId('touch-brake')).toBeNull();
+  });
+
+  it('groups the LEFT-thumb actions (Q + ◀ + SPIN) into the same cluster', () => {
+    const input = buildInput();
+    render(<TouchControls input={input} onPause={() => {}} onLeave={() => {}} />);
+    const left = screen.getByTestId('touch-left');
+    const cluster = left.closest('.touch-cluster-left');
+    expect(cluster).not.toBeNull();
+    expect(cluster!.contains(screen.getByTestId('touch-q'))).toBe(true);
+    expect(cluster!.contains(screen.getByTestId('touch-spin'))).toBe(true);
+    // RIGHT-thumb actions stay out of the left cluster.
+    expect(cluster!.contains(screen.getByTestId('touch-right'))).toBe(false);
+    expect(cluster!.contains(screen.getByTestId('touch-e'))).toBe(false);
+  });
+
+  it('groups the RIGHT-thumb actions (E + ▶ + BOOST + SKY) into the same cluster', () => {
+    const input = buildInput();
+    render(<TouchControls input={input} onPause={() => {}} onLeave={() => {}} />);
+    const right = screen.getByTestId('touch-right');
+    const cluster = right.closest('.touch-cluster-right');
+    expect(cluster).not.toBeNull();
+    expect(cluster!.contains(screen.getByTestId('touch-e'))).toBe(true);
+    expect(cluster!.contains(screen.getByTestId('touch-boost'))).toBe(true);
+    expect(cluster!.contains(screen.getByTestId('touch-skyway'))).toBe(true);
+    // LEFT-thumb actions stay out of the right cluster.
+    expect(cluster!.contains(screen.getByTestId('touch-left'))).toBe(false);
+    expect(cluster!.contains(screen.getByTestId('touch-q'))).toBe(false);
   });
 
   it('routes hold-to-fire actions through input.setAction with immediate release', () => {
@@ -141,22 +173,6 @@ describe('TouchControls', () => {
       });
       expect(spy).toHaveBeenCalledWith('touch', action, false);
     }
-  });
-
-  it('brake button cuts auto-throttle and sets down=true; release restores up=true', () => {
-    const input = buildInput();
-    render(<TouchControls input={input} onPause={() => {}} onLeave={() => {}} />);
-    const spy = setSpy(input);
-    spy.mockClear();
-
-    fireEvent.pointerDown(screen.getByTestId('touch-brake'));
-    expect(spy).toHaveBeenCalledWith('touch', 'up', false);
-    expect(spy).toHaveBeenCalledWith('touch', 'down', true);
-
-    spy.mockClear();
-    fireEvent.pointerUp(screen.getByTestId('touch-brake'));
-    expect(spy).toHaveBeenCalledWith('touch', 'down', false);
-    expect(spy).toHaveBeenCalledWith('touch', 'up', true);
   });
 
   it('clears hold-to-fire bits on pointerCancel and pointerLeave (not just pointerUp)', () => {

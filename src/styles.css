@@ -738,36 +738,41 @@ canvas {
   pointer-events: none;
 }
 
-/* Bottom-left steering cluster: brake (small, secondary) above the steer
-   button pair (big, primary thumb-zone). */
-.touch-steer {
+/* Each thumb gets its own cluster anchored in its corner. Buttons within a
+   cluster are stacked in 2 rows so a single thumb can roll between them
+   without leaving the cluster. */
+.touch-cluster {
   position: absolute;
   bottom: max(20px, env(safe-area-inset-bottom));
-  left: max(20px, env(safe-area-inset-left));
   display: flex;
   flex-direction: column;
   gap: 12px;
-  align-items: flex-start;
   pointer-events: auto;
 }
-.touch-steer-row {
+.touch-cluster-left {
+  left: max(20px, env(safe-area-inset-left));
+  align-items: flex-start;
+}
+.touch-cluster-right {
+  right: max(20px, env(safe-area-inset-right));
+  align-items: flex-end;
+}
+.touch-cluster-row {
   display: flex;
-  gap: 14px;
+  gap: 12px;
 }
 .touch-btn-steer {
-  /* The big primary buttons. Slightly bigger than action buttons because
-     they're the dominant input on a touchscreen racer. */
-  width: 78px;
-  height: 78px;
-  font-size: 22px;
+  /* Big primary turn buttons — the dominant input on a touchscreen racer. */
+  width: 84px;
+  height: 84px;
+  font-size: 26px;
 }
-.touch-btn-brake {
-  /* Smaller secondary button — for tight corners, not the main loop. */
-  width: 60px;
-  height: 60px;
-  font-size: 11px;
-  border-color: rgba(255, 255, 255, 0.55);
-  box-shadow: 0 0 10px rgba(255, 255, 255, 0.2);
+.touch-btn-boost {
+  /* Boost is the most-used hold-to-fire utility — give it the steer-button
+     treatment so the right thumb can press it without precision. */
+  width: 84px;
+  height: 84px;
+  font-size: 13px;
 }
 
 .touch-buttons {
