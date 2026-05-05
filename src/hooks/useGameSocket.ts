@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 import { GameSocket, resolveServerUrl } from '../net/socket.ts';
 import type { Action } from '../state.ts';
 import type { ClientMessage } from '../../shared/protocol.ts';
@@ -113,21 +113,33 @@ export const useGameSocket = (
     };
   }, [enabled, trackId, pseudo, color, roomName, cls, asSpectator, dispatch]);
 
-  return {
-    send: (msg) => ref.current?.send(msg),
-    connect: () => {
-      ref.current?.connect(buildUrl(trackId, sessionRef.current, roomName, asSpectator));
-    },
-    disconnect: () => {
-      if (reconnectTimer.current !== null) {
-        clearTimeout(reconnectTimer.current);
-        reconnectTimer.current = null;
-      }
-      reconnectAttempts.current = MAX_RECONNECT_ATTEMPTS;
-      ref.current?.disconnect();
-      ref.current = null;
-    },
-  };
+  // Memoise so consumers depending on `socket` in useEffect deps don't see
+  // a new object on every render — that would trigger a re-fire (and a
+  // duplicate `socket.send(...)`) on every state update, which under heavy
+  // server traffic is enough to trip the per-socket rate limiter.
+  const latestRef = useRef({ trackId, roomName, asSpectator });
+  useEffect(() => {
+    latestRef.current = { trackId, roomName, asSpectator };
+  }, [trackId, roomName, asSpectator]);
+  return useMemo<SocketAPI>(
+    () => ({
+      send: (msg) => ref.current?.send(msg),
+      connect: () => {
+        const { trackId: t, roomName: r, asSpectator: s } = latestRef.current;
+        ref.current?.connect(buildUrl(t, sessionRef.current, r, s));
+      },
+      disconnect: () => {
+        if (reconnectTimer.current !== null) {
+          clearTimeout(reconnectTimer.current);
+          reconnectTimer.current = null;
+        }
+        reconnectAttempts.current = MAX_RECONNECT_ATTEMPTS;
+        ref.current?.disconnect();
+        ref.current = null;
+      },
+    }),
+    [],
+  );
 };
 
 const buildUrl = (

@@ -17,7 +17,6 @@ import {
   applyRaceOutcome,
   loadCareerStats,
   saveCareerStats,
-  type CareerStats,
 } from './storage/careerStats.ts';
 import {
   DEFAULT_SHIP_CLASS,
@@ -97,7 +96,6 @@ export function App() {
   }));
   const [connectRequested, setConnectRequested] = useState(false);
   const [connectAsSpectator, setConnectAsSpectator] = useState(false);
-  const [careerStats, setCareerStats] = useState<CareerStats>(loadCareerStats);
   const lastRecordedResultsRef = useRef<readonly unknown[] | null>(null);
 
   // Push audio settings to the singleton mixer whenever they change.
@@ -250,7 +248,9 @@ export function App() {
 
   // Career-stats accumulation. Fires once per race when results land — guard
   // by reference equality on the standings array so a re-render or a re-entry
-  // of the results screen doesn't double-count.
+  // of the results screen doesn't double-count. Reads localStorage fresh
+  // each fire instead of holding a copy in React state, so the Menu (which
+  // also reads on every render) stays in sync without a re-render loop.
   useEffect(() => {
     if (state.view !== 'results' || state.standings.length === 0) return;
     if (lastRecordedResultsRef.current === state.standings) return;
@@ -259,15 +259,14 @@ export function App() {
       ? state.standings.find((s) => s.id === state.myId) ?? null
       : null;
     if (!me) return;
-    const next = applyRaceOutcome(careerStats, {
+    const next = applyRaceOutcome(loadCareerStats(), {
       position: me.ko ? null : me.position,
       ko: me.ko,
       kosScored: state.myKosThisRace,
       totalRacers: state.standings.length,
     });
-    setCareerStats(next);
     saveCareerStats(next);
-  }, [state.view, state.standings, state.myId, state.myKosThisRace, careerStats]);
+  }, [state.view, state.standings, state.myId, state.myKosThisRace]);
 
   return (
     <div className="app">

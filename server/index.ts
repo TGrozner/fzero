@@ -166,6 +166,15 @@ export class Room {
     if (upgrade?.toLowerCase() !== 'websocket') {
       return new Response('expected websocket', { status: 426 });
     }
+    // If the room is sitting in FINISHED with nobody still connected, snap
+    // it straight back to WAITING so a fresh visitor (or e2e test re-using
+    // the default lobby) doesn't hit a 409 for the entire 8 s cooldown.
+    // The auto-rejoin path in alarm() handles the FINISHED → WAITING
+    // transition WHEN sockets are still open; this only applies when they
+    // aren't.
+    if (this.core.phase === 'FINISHED' && this.state.getWebSockets().length === 0) {
+      this.core.resetToWaiting();
+    }
     // Apply query overrides (only takes effect while WAITING). Track override
     // only fires before any human is in the room, so we don't blow away an
     // active vote tally just because someone joined with a different ?track=.
