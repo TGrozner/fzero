@@ -67,6 +67,12 @@ const SHIP_BANK_DECAY = 9;
 // 1 full server tick (10 Hz → 100 ms) so we always have a "next" snapshot to
 // interpolate toward without lagging far enough behind that inputs feel mushy.
 const INTERP_DELAY_MS = 100;
+
+// Cap forward dead-reckoning on the local ship at this many ms past the most
+// recent snapshot so a stalled WS doesn't catapult the player across the
+// track. With healthy 10 Hz snapshots the actual extrapolation is usually
+// 0–100 ms, well below the cap.
+const LOCAL_EXTRAP_CAP_MS = 250;
 const FOG_START = 60;
 const FOG_END = 480;
 const STAR_COUNT = 80;
@@ -129,6 +135,32 @@ export const computeInterpolatedShips = (
   const prevById = new Map(prev.ships.map((s) => [s.id, s]));
   for (const ship of next.ships) {
     out.set(ship.id, interpolate(prevById.get(ship.id), ship, t));
+  }
+  // Local ship: skip the interp delay and extrapolate forward from the most
+  // recent snapshot using velocity + angular velocity. This trades a small
+  // overshoot risk (capped to LOCAL_EXTRAP_CAP_MS) for ~150 ms less perceived
+  // input latency on the player's own ship — the dominant driver of the
+  // "input feels mushy" feedback at 10 Hz tick.
+  if (state.myId) {
+    const me = newest.ships.find((s) => s.id === state.myId);
+    if (me) {
+      const sinceMs = Math.max(0, Math.min(LOCAL_EXTRAP_CAP_MS, nowMs - newest.receivedAt));
+      const extrapS = sinceMs / 1000;
+      // Estimate angular velocity from the last two snapshots so steering
+      // also feels reactive, not just translation.
+      const prevSnap = state.snapshots.length >= 2 ? state.snapshots[state.snapshots.length - 2] : undefined;
+      const prevMe = prevSnap?.ships.find((s) => s.id === state.myId);
+      const dtSnapS = prevSnap ? (newest.receivedAt - prevSnap.receivedAt) / 1000 : 0;
+      const angVel = prevMe && dtSnapS > 0 ? wrapAngle(me.h - prevMe.h) / dtSnapS : 0;
+      out.set(state.myId, {
+        x: me.x + me.vx * extrapS,
+        y: me.y + me.vy * extrapS,
+        h: me.h + angVel * extrapS,
+        vx: me.vx,
+        vy: me.vy,
+        flags: me.f,
+      });
+    }
   }
   return out;
 };

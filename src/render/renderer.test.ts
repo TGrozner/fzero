@@ -1,13 +1,112 @@
 import { describe, expect, it } from 'vitest';
 import {
   clipPolygonAgainstZ,
+  computeInterpolatedShips,
   segmentWindowAhead,
   project,
   RenderState,
   type WorldPt,
 } from './renderer.ts';
+import { buildInitialClientState } from '../state.ts';
+import type { ShipSnapshot } from '../../shared/protocol.ts';
+
+const ship = (
+  id: string,
+  x: number,
+  y: number,
+  h: number,
+  vx: number,
+  vy: number,
+): ShipSnapshot => ({
+  id,
+  x,
+  y,
+  h,
+  vx,
+  vy,
+  p: 1,
+  k: 0,
+  l: 0,
+  a: 0,
+  f: 0,
+  sc: 0,
+  dc: 0,
+});
 
 const w = (x: number, y: number, z: number): WorldPt => ({ x, y, z });
+
+describe('computeInterpolatedShips local prediction', () => {
+  it('extrapolates the local ship forward from the latest snapshot', () => {
+    // Two snapshots 100 ms apart, ship moving at +30 px/s on x.
+    const snap = (t: number): { ships: ShipSnapshot[]; receivedAt: number } => ({
+      receivedAt: 1000 + t,
+      ships: [ship('me', t * 0.03, 0, 0, 30, 0)],
+    });
+    const a = snap(0);
+    const b = snap(100);
+    const state = {
+      ...buildInitialClientState(),
+      myId: 'me',
+      snapshots: [
+        { tick: 0, time: 0, receivedAt: a.receivedAt, ships: a.ships, racersLeft: 1, pk: 0 },
+        { tick: 1, time: 0.1, receivedAt: b.receivedAt, ships: b.ships, racersLeft: 1, pk: 0 },
+      ],
+    };
+    // Render 50 ms after the latest snapshot: dead-reckoning should advance
+    // x by 30 * 0.05 = 1.5 from the snapshot's x = 3.
+    const out = computeInterpolatedShips(state, b.receivedAt + 50);
+    const me = out.get('me');
+    expect(me?.x).toBeCloseTo(3 + 1.5, 5);
+  });
+
+  it('caps local extrapolation so a stalled WS does not catapult the ship', () => {
+    const a = { receivedAt: 1000, ships: [ship('me', 0, 0, 0, 100, 0)] };
+    const state = {
+      ...buildInitialClientState(),
+      myId: 'me',
+      snapshots: [{ tick: 0, time: 0, receivedAt: a.receivedAt, ships: a.ships, racersLeft: 1, pk: 0 }],
+    };
+    // 5 seconds later — far beyond the 250 ms cap.
+    const out = computeInterpolatedShips(state, a.receivedAt + 5000);
+    const me = out.get('me');
+    // Capped extrap = 100 * 0.25 = 25, NOT 100 * 5 = 500.
+    expect(me?.x).toBeCloseTo(25, 5);
+  });
+
+  it('non-local ships still use the interp-delay path (no overshoot)', () => {
+    const a = { receivedAt: 1000, ships: [ship('other', 0, 0, 0, 100, 0)] };
+    const b = { receivedAt: 1100, ships: [ship('other', 10, 0, 0, 100, 0)] };
+    const state = {
+      ...buildInitialClientState(),
+      myId: 'me', // not 'other'
+      snapshots: [
+        { tick: 0, time: 0, receivedAt: a.receivedAt, ships: a.ships, racersLeft: 1, pk: 0 },
+        { tick: 1, time: 0.1, receivedAt: b.receivedAt, ships: b.ships, racersLeft: 1, pk: 0 },
+      ],
+    };
+    // Render time = 1100 + 50 - 100 (interp delay) = 1050 → halfway between a and b.
+    const out = computeInterpolatedShips(state, b.receivedAt + 50);
+    const other = out.get('other');
+    expect(other?.x).toBeCloseTo(5, 1);
+  });
+
+  it('skips local prediction when myId is null (spectator path)', () => {
+    const a = { receivedAt: 1000, ships: [ship('p1', 0, 0, 0, 100, 0)] };
+    const b = { receivedAt: 1100, ships: [ship('p1', 10, 0, 0, 100, 0)] };
+    const state = {
+      ...buildInitialClientState(),
+      myId: null, // spectator
+      snapshots: [
+        { tick: 0, time: 0, receivedAt: a.receivedAt, ships: a.ships, racersLeft: 1, pk: 0 },
+        { tick: 1, time: 0.1, receivedAt: b.receivedAt, ships: b.ships, racersLeft: 1, pk: 0 },
+      ],
+    };
+    const out = computeInterpolatedShips(state, b.receivedAt + 50);
+    const p1 = out.get('p1');
+    // Interpolated halfway, NOT extrapolated forward.
+    expect(p1?.x).toBeCloseTo(5, 1);
+  });
+});
 
 describe('clipPolygonAgainstZ', () => {
   it('returns the polygon unchanged when every vertex is in front of the plane', () => {

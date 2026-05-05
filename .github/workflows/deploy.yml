@@ -4,6 +4,11 @@ name: Deploy
 # successfully on a main-branch push. A red CI no longer ships to prod.
 # Manual dispatch is still available as an escape hatch.
 
+# Show the originating commit's title in the Actions UI instead of just
+# "Deploy", so the run list stays scannable.
+run-name: |
+  Deploy — ${{ github.event.workflow_run.display_title || github.event.workflow_run.head_commit.message || 'manual' }}
+
 on:
   workflow_run:
     workflows: ['CI']
