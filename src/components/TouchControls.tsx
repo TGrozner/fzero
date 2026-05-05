@@ -1,71 +1,87 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { InputApi, KeyState } from '../hooks/useKeyboard.ts';
+import {
+  computeStick,
+  NEUTRAL_STICK,
+  RADIUS_PX,
+  type StickState,
+} from './joystickMath.ts';
 
 type Props = {
   input: InputApi;
+  onPause: () => void;
+  onLeave: () => void;
+};
+
+const haptic = (ms = 8): void => {
+  try {
+    navigator.vibrate?.(ms);
+  } catch {
+    // navigator.vibrate not supported on iOS or older browsers — noop.
+  }
 };
 
 /**
- * Touch / pointer control overlay. Active only on touch devices. Uses
- * pointer events so it works on iPhone/Android/desktop touchscreens
- * without spinning up a separate gesture lib.
+ * Touch / pointer control overlay. Renders ONLY on touch-primary devices
+ * (see isTouchDevice). Layout, with safe-area insets respected:
  *
- * Layout:
- *   • Bottom-left: virtual joystick (drag from anywhere in the left half).
- *     y < 0 → up=true (throttle), y > 0 → down=true (brake), |x| → left/right.
- *   • Bottom-right: 4 action buttons — SPIN, Q, E, BOOST. Tap-and-hold OK.
- *   • Top-right: SKYWAY (always shown — server gates on KO meter).
+ *   ┌──────────────────────────────────────────┐
+ *   │ [⏸] [⨯]                          [SKY]   │
+ *   │                                          │
+ *   │                                          │
+ *   │                                  [SPIN]  │
+ *   │                                  [Q] [E] │
+ *   │   (joystick area —               [BOOST] │
+ *   │    bottom 60 % of                        │
+ *   │    the left half)                        │
+ *   └──────────────────────────────────────────┘
  *
- * Each button writes via `setAction` on press and clears on release/cancel.
- * The hook combines touch with keyboard via OR so concurrent inputs work.
+ * The joystick is "floating" — anchored at the touch origin, the knob tracks
+ * the finger up to RADIUS_PX past the deadzone. A semi-transparent base ring
+ * + knob render only while the gesture is active.
+ *
+ * Each button writes via `setAction` on press and clears on release/cancel,
+ * with a short haptic pulse on press where supported.
  */
-export function TouchControls({ input }: Props) {
+export function TouchControls({ input, onPause, onLeave }: Props) {
   const padRef = useRef<HTMLDivElement | null>(null);
-  // Active joystick gesture: pointer id + start position.
   const activePointerRef = useRef<number | null>(null);
   const startRef = useRef<{ x: number; y: number } | null>(null);
+  // Anchor position in CSS pixels (relative to the viewport) — used to
+  // position the visible joystick base + knob.
+  const [anchor, setAnchor] = useState<{ x: number; y: number } | null>(null);
+  const [stick, setStick] = useState<StickState>(NEUTRAL_STICK);
 
   useEffect(() => {
     const pad = padRef.current;
     if (!pad) return;
-    const setStick = (dx: number, dy: number) => {
-      // Normalize: dead-zone radius 12px, full deflection at 80px.
-      const len = Math.hypot(dx, dy);
-      if (len < 12) {
-        input.setAction('touch', 'up', false);
-        input.setAction('touch', 'down', false);
-        input.setAction('touch', 'left', false);
-        input.setAction('touch', 'right', false);
-        return;
-      }
-      const nx = dx / Math.max(len, 1);
-      const ny = dy / Math.max(len, 1);
-      // Threshold: any axis component > 0.35 of full deflection is "on".
-      input.setAction('touch', 'left', nx < -0.35);
-      input.setAction('touch', 'right', nx > 0.35);
-      input.setAction('touch', 'up', ny < -0.35);
-      input.setAction('touch', 'down', ny > 0.6);
+    const applyStick = (next: StickState) => {
+      input.setAction('touch', 'up', next.up);
+      input.setAction('touch', 'down', next.down);
+      input.setAction('touch', 'left', next.left);
+      input.setAction('touch', 'right', next.right);
+      setStick(next);
     };
     const onPointerDown = (e: PointerEvent) => {
       if (activePointerRef.current !== null) return;
       activePointerRef.current = e.pointerId;
       startRef.current = { x: e.clientX, y: e.clientY };
+      setAnchor({ x: e.clientX, y: e.clientY });
       pad.setPointerCapture(e.pointerId);
+      e.preventDefault();
     };
     const onPointerMove = (e: PointerEvent) => {
       if (e.pointerId !== activePointerRef.current) return;
       const start = startRef.current;
       if (!start) return;
-      setStick(e.clientX - start.x, e.clientY - start.y);
+      applyStick(computeStick(e.clientX - start.x, e.clientY - start.y));
     };
     const release = (e: PointerEvent) => {
       if (e.pointerId !== activePointerRef.current) return;
       activePointerRef.current = null;
       startRef.current = null;
-      input.setAction('touch', 'up', false);
-      input.setAction('touch', 'down', false);
-      input.setAction('touch', 'left', false);
-      input.setAction('touch', 'right', false);
+      setAnchor(null);
+      applyStick(NEUTRAL_STICK);
     };
     pad.addEventListener('pointerdown', onPointerDown);
     pad.addEventListener('pointermove', onPointerMove);
@@ -81,7 +97,71 @@ export function TouchControls({ input }: Props) {
 
   return (
     <div className="touch-controls" data-testid="touch-controls">
-      <div ref={padRef} className="touch-pad" data-testid="touch-pad" aria-label="Steering pad" />
+      {/* Joystick gesture surface — covers the whole bottom-left area. */}
+      <div
+        ref={padRef}
+        className="touch-pad"
+        data-testid="touch-pad"
+        aria-label="Steering joystick"
+        role="presentation"
+      />
+      {/* Visible joystick base + knob (rendered on top of the pad surface). */}
+      {anchor && (
+        <>
+          <div
+            className="touch-joystick-base"
+            data-testid="touch-joystick-base"
+            style={{
+              left: anchor.x - RADIUS_PX,
+              top: anchor.y - RADIUS_PX,
+              width: RADIUS_PX * 2,
+              height: RADIUS_PX * 2,
+            }}
+          />
+          <div
+            className="touch-joystick-knob"
+            data-testid="touch-joystick-knob"
+            data-active={stick.active ? 'true' : 'false'}
+            style={{
+              left: anchor.x + stick.knob.x - 22,
+              top: anchor.y + stick.knob.y - 22,
+            }}
+          />
+        </>
+      )}
+
+      {/* Top-left UI buttons: pause, leave. Always tap-fire (no hold state). */}
+      <div className="touch-ui-row">
+        <button
+          type="button"
+          className="touch-ui-btn"
+          data-testid="touch-pause"
+          aria-label="Pause"
+          onPointerDown={(e) => {
+            e.preventDefault();
+            haptic(6);
+            onPause();
+          }}
+        >
+          ⏸
+        </button>
+        <button
+          type="button"
+          className="touch-ui-btn"
+          data-testid="touch-leave"
+          aria-label="Leave race"
+          onPointerDown={(e) => {
+            e.preventDefault();
+            haptic(6);
+            onLeave();
+          }}
+        >
+          ⨯
+        </button>
+      </div>
+
+      {/* Bottom-right action buttons: SPIN above, Q+E middle, BOOST below.
+          Each is hold-to-fire (clears on pointerup / pointercancel / leave). */}
       <div className="touch-buttons">
         <ActionBtn input={input} action="spin" label="SPIN" testid="touch-spin" />
         <div className="touch-row">
@@ -90,6 +170,9 @@ export function TouchControls({ input }: Props) {
         </div>
         <ActionBtn input={input} action="boost" label="BOOST" testid="touch-boost" />
       </div>
+
+      {/* Top-right Skyway. Server gates the actual effect on the KO meter
+          but we keep the button always visible so muscle memory stays put. */}
       <ActionBtn
         input={input}
         action="skyway"
@@ -114,7 +197,11 @@ const ActionBtn = ({
   testid: string;
   className?: string;
 }): React.JSX.Element => {
-  const press = () => input.setAction('touch', action, true);
+  const press = (e: React.PointerEvent<HTMLButtonElement>) => {
+    e.preventDefault();
+    haptic(6);
+    input.setAction('touch', action, true);
+  };
   const release = () => input.setAction('touch', action, false);
   return (
     <button
@@ -130,4 +217,3 @@ const ActionBtn = ({
     </button>
   );
 };
-

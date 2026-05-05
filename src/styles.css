@@ -728,7 +728,8 @@ canvas {
   text-align: right;
 }
 
-/* Mobile / touch overlay. */
+/* Mobile / touch overlay. Buttons sized for thumbs (≥ 72 px) and offset
+   away from the iPhone notch + home indicator via safe-area insets. */
 .touch-controls {
   position: absolute;
   inset: 0;
@@ -737,35 +738,65 @@ canvas {
 }
 .touch-pad {
   position: absolute;
+  /* Cover the whole left half + a generous bottom margin: comfortable
+     thumb reach in landscape, doesn't fight the action buttons. */
   bottom: 0;
   left: 0;
   width: 50%;
-  height: 60%;
+  height: 70%;
   pointer-events: auto;
   touch-action: none;
 }
+/* Visible "floating" joystick — only rendered while a gesture is active. */
+.touch-joystick-base {
+  position: fixed;
+  border-radius: 50%;
+  background: rgba(58, 160, 255, 0.06);
+  border: 2px solid rgba(58, 160, 255, 0.4);
+  box-shadow: 0 0 16px rgba(58, 160, 255, 0.25);
+  pointer-events: none;
+  z-index: 12;
+}
+.touch-joystick-knob {
+  position: fixed;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  background: rgba(58, 160, 255, 0.85);
+  box-shadow: 0 0 14px rgba(58, 160, 255, 0.7);
+  border: 2px solid rgba(255, 255, 255, 0.85);
+  pointer-events: none;
+  z-index: 13;
+  transition: background 80ms ease;
+}
+.touch-joystick-knob[data-active='true'] {
+  background: rgba(255, 58, 209, 0.85);
+  box-shadow: 0 0 18px rgba(255, 58, 209, 0.7);
+}
+
 .touch-buttons {
   position: absolute;
-  bottom: 16px;
-  right: 16px;
+  bottom: max(20px, env(safe-area-inset-bottom));
+  right: max(20px, env(safe-area-inset-right));
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 12px;
   align-items: stretch;
   pointer-events: auto;
 }
 .touch-row {
   display: flex;
-  gap: 10px;
+  gap: 12px;
 }
 .touch-btn {
   background: rgba(8, 4, 28, 0.7);
   color: var(--text);
   border: 2px solid var(--accent);
   border-radius: 50%;
-  width: 64px;
-  height: 64px;
-  font-size: 12px;
+  /* 72 px is the minimum recommended thumb-friendly tap target. */
+  width: 72px;
+  height: 72px;
+  font-size: 13px;
   font-weight: 700;
   letter-spacing: 0.06em;
   display: flex;
@@ -778,18 +809,53 @@ canvas {
   box-shadow: 0 0 12px rgba(255, 58, 209, 0.35);
   touch-action: manipulation;
   cursor: pointer;
+  /* Disable iOS' translucent grey "tap highlight" — we have our own. */
+  -webkit-tap-highlight-color: transparent;
 }
 .touch-btn:active {
-  background: rgba(255, 58, 209, 0.4);
+  background: rgba(255, 58, 209, 0.45);
   transform: scale(0.94);
 }
 .touch-skyway-btn {
   position: absolute;
-  top: 60px;
-  right: 16px;
+  top: max(60px, calc(env(safe-area-inset-top) + 16px));
+  right: max(20px, env(safe-area-inset-right));
   border-color: var(--accent-2);
   box-shadow: 0 0 12px rgba(58, 255, 225, 0.4);
   pointer-events: auto;
+}
+
+/* Top-left UI buttons (pause, leave). Smaller than the action buttons
+   because they're tap-only and we want the thumb-zone left for racing. */
+.touch-ui-row {
+  position: absolute;
+  top: max(12px, env(safe-area-inset-top));
+  left: max(12px, env(safe-area-inset-left));
+  display: flex;
+  gap: 10px;
+  pointer-events: auto;
+}
+.touch-ui-btn {
+  background: rgba(8, 4, 28, 0.7);
+  color: var(--text);
+  border: 2px solid rgba(255, 255, 255, 0.45);
+  border-radius: 50%;
+  width: 48px;
+  height: 48px;
+  font-size: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  user-select: none;
+  -webkit-user-select: none;
+  padding: 0;
+  touch-action: manipulation;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.touch-ui-btn:active {
+  background: rgba(255, 255, 255, 0.18);
+  transform: scale(0.92);
 }
 
 .minimap {

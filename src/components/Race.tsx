@@ -379,7 +379,11 @@ export function Race({ state, dispatch, socket, onLeave }: Props) {
         />
       )}
       {isTouchDevice() && state.phase === 'RACING' && !myKo && !state.paused && (
-        <TouchControls input={input} />
+        <TouchControls
+          input={input}
+          onPause={() => dispatch({ type: 'TOGGLE_PAUSE' })}
+          onLeave={onLeave}
+        />
       )}
       {state.rttMs !== null && (
         <div
