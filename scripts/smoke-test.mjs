@@ -1,8 +1,15 @@
 // Quick prod smoke test: connect a WS client to the deployed worker,
 // send a hello, wait for welcome + 1 snapshot.
+//
+// Usage:
+//   SMOKE_URL=wss://your-worker.workers.dev/ws?fast=1 node scripts/smoke-test.mjs
 import WebSocket from 'ws';
 
-const URL = process.env.SMOKE_URL ?? 'wss://neon-drift-server.thomas-grozner.workers.dev/ws?fast=1';
+const URL = process.env.SMOKE_URL;
+if (!URL) {
+  console.error('SMOKE_URL env var is required (e.g. wss://your-worker.workers.dev/ws?fast=1)');
+  process.exit(2);
+}
 
 const ws = new WebSocket(URL);
 let gotWelcome = false;

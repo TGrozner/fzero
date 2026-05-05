@@ -2,6 +2,31 @@
   "name": "neon-drift",
   "private": true,
   "version": "0.1.0",
+  "description": "A 99-player synthwave anti-grav battle-royale racer. React + TypeScript + Cloudflare Workers + Durable Objects.",
+  "license": "MIT",
+  "homepage": "https://github.com/TGrozner/neon-drift#readme",
+  "bugs": {
+    "url": "https://github.com/TGrozner/neon-drift/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/TGrozner/neon-drift.git"
+  },
+  "keywords": [
+    "game",
+    "racing",
+    "battle-royale",
+    "multiplayer",
+    "cloudflare-workers",
+    "durable-objects",
+    "websocket",
+    "react",
+    "typescript",
+    "synthwave"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
   "type": "module",
   "scripts": {
     "dev": "concurrently -k -n vite,worker -c blue,magenta \"vite\" \"wrangler dev --local --port 8787\"",
@@ -18,7 +43,8 @@
     "e2e": "playwright test",
     "e2e:install": "playwright install --with-deps chromium",
     "deploy:server": "wrangler deploy",
-    "deploy:client": "wrangler pages deploy dist --project-name=neon-drift --branch=main"
+    "deploy:client": "wrangler pages deploy dist --project-name=neon-drift --branch=main",
+    "gen-og": "node scripts/gen-og.mjs"
   },
   "dependencies": {
     "react": "^19.2.5",

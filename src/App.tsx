@@ -1,8 +1,14 @@
-import { useReducer, useState, useCallback, useEffect } from 'react';
+import {
+  useReducer,
+  useState,
+  useCallback,
+  useEffect,
+  lazy,
+  Suspense,
+} from 'react';
 import { reducer, buildInitialClientState } from './state.ts';
 import { Menu } from './components/Menu.tsx';
 import { Lobby } from './components/Lobby.tsx';
-import { Race } from './components/Race.tsx';
 import { Results } from './components/Results.tsx';
 import { useGameSocket } from './hooks/useGameSocket.ts';
 import { getMixer } from './audio/mixer.ts';
@@ -11,6 +17,12 @@ import {
   SHIP_CLASSES,
   type ShipClass,
 } from '../shared/constants.ts';
+
+// Race carries the renderer + audio loop + most of the game-only code.
+// Splitting it out shrinks the menu landing chunk by ~40%.
+const Race = lazy(() =>
+  import('./components/Race.tsx').then((m) => ({ default: m.Race })),
+);
 
 const STORAGE_KEY = 'neon-drift:profile';
 
@@ -96,6 +108,18 @@ export function App() {
       window.removeEventListener('pointerdown', onGesture);
       window.removeEventListener('keydown', onGesture);
     };
+  }, []);
+
+  // Pause audio when the tab is hidden so backgrounded sessions don't keep
+  // the AudioContext spinning. requestAnimationFrame already pauses naturally,
+  // so the render loop and input loop are handled by the browser.
+  useEffect(() => {
+    const onVisibility = () => {
+      if (document.hidden) getMixer().suspend();
+      else getMixer().unlock();
+    };
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => document.removeEventListener('visibilitychange', onVisibility);
   }, []);
 
   const persist = useCallback(
@@ -188,7 +212,9 @@ export function App() {
         />
       )}
       {state.view === 'race' && (
-        <Race state={state} dispatch={dispatch} socket={socket} onLeave={handleLeave} />
+        <Suspense fallback={<div className="lobby-screen"><div className="pulse">LOADING…</div></div>}>
+          <Race state={state} dispatch={dispatch} socket={socket} onLeave={handleLeave} />
+        </Suspense>
       )}
       {state.view === 'results' && (
         <Results state={state} onAgain={handleAgain} onMenu={handleLeave} />

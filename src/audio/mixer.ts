@@ -83,6 +83,14 @@ export class AudioMixer {
     }
   }
 
+  /** Suspend audio (used while the tab is hidden so we don't burn CPU). */
+  suspend(): void {
+    if (!this.ctx) return;
+    if (this.ctx.state === 'running') {
+      void this.ctx.suspend();
+    }
+  }
+
   setVolume(v: number): void {
     this.vol = Math.max(0, Math.min(1, v));
     if (this.master) this.master.gain.value = this.vol;

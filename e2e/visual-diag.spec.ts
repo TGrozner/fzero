@@ -1,11 +1,13 @@
 /**
  * Diagnostic visual spec — drives the ship through several poses and dumps
  * screenshots into playwright-report/visual/ for a human (or LLM) to inspect.
- * Runs only when explicitly invoked: `npx playwright test e2e/visual-diag.spec.ts`.
+ * Skipped by default; opt-in by setting RUN_DIAG=1.
  */
 import { test, type Page } from '@playwright/test';
 
 const SCREENSHOT_DIR = 'playwright-report/visual';
+
+test.skip(!process.env['RUN_DIAG'], 'set RUN_DIAG=1 to run the diagnostic spec');
 
 const uniqueRoom = (label: string): string =>
   `diag-${label}-${Date.now()}-${Math.floor(Math.random() * 1e6)}`;

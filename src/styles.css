@@ -987,3 +987,33 @@ canvas {
   font-size: 13px;
   z-index: 100;
 }
+
+/* Focus rings for keyboard nav. */
+button:focus-visible,
+input[type='text']:focus-visible,
+.swatch:focus-visible,
+.class-chip:focus-visible {
+  outline: 2px solid var(--accent-2);
+  outline-offset: 2px;
+}
+
+/* Respect users who prefer less motion: kill flashy animations + transitions
+ * but keep functional ones like meter fills. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+  .canvas-wrap.shake { animation: none !important; }
+  .fx-flash, .fx-side-ring, .fx-perfect, .fx-pb, .fx-lap, .fx-position,
+  .fx-damage, .fx-hit-pop, .fx-ko-pop, .fx-hitmarker, .death-cam-overlay::before,
+  .death-cam-overlay::after, .death-cam-tag {
+    animation: none !important;
+  }
+  .meter.meter-ready-glow,
+  .meter.meter-low,
+  .meter-ready { animation: none !important; }
+}

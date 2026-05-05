@@ -1,3 +1,4 @@
+import type * as React from 'react';
 import type { Action } from '../state.ts';
 import { SHIP_CLASSES, SHIP_COLORS, type ShipClass } from '../../shared/constants.ts';
 import { TRACKS } from '../../shared/track.ts';
@@ -38,6 +39,10 @@ export function Menu({
   busy,
 }: Props) {
   const canStart = pseudo.trim().length >= 1 && !busy;
+  const submit = (e: React.FormEvent): void => {
+    e.preventDefault();
+    if (canStart) onStart();
+  };
   // PBs are read on every render — the file lives in localStorage, the
   // call is cheap (a JSON.parse of a tiny object), and the menu is not
   // perf-sensitive. Reading lazily here means the menu always reflects
@@ -47,7 +52,13 @@ export function Menu({
   return (
     <>
       <MenuBackdrop color={color} cls={cls} />
-      <div className="menu" data-testid="menu">
+      <form
+        className="menu"
+        data-testid="menu"
+        onSubmit={submit}
+        aria-label="Race configuration"
+        aria-busy={busy}
+      >
       <h1>NEON DRIFT</h1>
       <div className="row" style={{ flexDirection: 'column', alignItems: 'stretch', gap: 4 }}>
         <label htmlFor="pseudo">Pilot name</label>
@@ -197,7 +208,7 @@ export function Menu({
       </div>
       <button
         data-testid="race-button"
-        onClick={onStart}
+        type="submit"
         disabled={!canStart}
         style={{ marginTop: 8 }}
       >
@@ -206,7 +217,7 @@ export function Menu({
       <div className="controls-help">
         WASD / Arrows to drive · Shift boost · Q/E side attack · Enter spin attack · Space skyway · P pause · Esc menu
       </div>
-    </div>
+    </form>
     </>
   );
 }

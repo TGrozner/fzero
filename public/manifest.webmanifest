@@ -1,0 +1,25 @@
+{
+  "name": "Neon Drift",
+  "short_name": "Neon Drift",
+  "description": "99-player synthwave anti-grav battle-royale racing.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "fullscreen",
+  "orientation": "landscape",
+  "background_color": "#0a0420",
+  "theme_color": "#0a0420",
+  "categories": ["games", "entertainment"],
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/apple-touch-icon.png",
+      "sizes": "180x180",
+      "type": "image/png"
+    }
+  ]
+}

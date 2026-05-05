@@ -1,8 +1,13 @@
 # Neon Drift
 
+[![CI](https://github.com/TGrozner/neon-drift/actions/workflows/ci.yml/badge.svg)](https://github.com/TGrozner/neon-drift/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+
 A 99-player synthwave anti-grav battle-royale racer, built end-to-end with React + TypeScript + Cloudflare Workers + Durable Objects.
 
 > Top-down anti-grav racing. Real-time WebSocket multiplayer. Bots fill empty seats so it's always 99 racers on the grid.
+
+> **Play live:** _link added once the Pages project is configured — see [Deployment](#deployment)._
 
 ## Features
 
@@ -17,6 +22,7 @@ A 99-player synthwave anti-grav battle-royale racer, built end-to-end with React
 - **Perfect start** — full throttle on GO grants a free 1.5 s boost.
 - **Pickups** — boost pads, heal plates, and mines, respawning every 5 s.
 - **Death cam** — when you're KO'd, the camera locks onto whoever did it for ~1.5 s.
+- **Spectator mode** — after your KO, the camera follows the leader so you can watch the rest of the race play out.
 - **Personal bests** — best lap + best race per track, persisted locally.
 - **Mobile-ready** — touch joystick + action buttons on phones / tablets.
 - Real-time **server-authoritative** simulation @ 30 Hz, snapshots @ 20 Hz, with client interpolation.
@@ -45,6 +51,14 @@ A 99-player synthwave anti-grav battle-royale racer, built end-to-end with React
 | Skyway (when KO Meter full) | Space |
 | Pause overlay (display only) | P |
 | Leave race | Escape |
+
+On phones / tablets: a left-side joystick steers and accelerates, right-side buttons map to boost / spin / side / Skyway.
+
+## Accessibility
+
+- Respects `prefers-reduced-motion`: screen shake, vignette pulse and trail flicker are disabled when the OS asks for less motion.
+- Full keyboard navigation in the menus (focus rings, `Tab` cycles).
+- Audio is opt-out (mute in the menu) and never auto-plays without a user gesture.
 
 ## Running locally
 
@@ -129,15 +143,27 @@ Bots run in the same `RoomCore` simulation so they're indistinguishable from hum
 To deploy manually:
 
 ```bash
-npx wrangler deploy                                    # Worker (server)
-npx wrangler pages deploy dist --project-name=neon-drift    # Pages (client)
+npx wrangler deploy                                                     # Worker (server)
+npm run build && npx wrangler pages deploy dist --project-name=neon-drift   # Pages (client)
 ```
 
-The client picks the server URL from `VITE_SERVER_URL` (set this in your Pages project env) and falls back to `wss://<your-pages-domain>/ws`.
+The client picks the WebSocket URL in this order:
 
-## Live
+1. `VITE_SERVER_URL` (build-time env) — recommended. Set it on the Pages project / Actions repo variable. Example: `wss://neon-drift-server.<your>.workers.dev/ws`.
+2. Same-origin `/ws` — works when the Pages project pairs with the bundled Pages Function at [`functions/ws.ts`](functions/ws.ts), which forwards to the Worker. Set `WORKER_URL=https://<your-worker>.workers.dev` on the Pages project.
 
-Public URL: see the GitHub release / repo description (filled in after deploy).
+Option 1 is the cheapest (one less hop, no Pages Function invocations). Option 2 is handy when you want a single domain or your Worker isn't publicly reachable.
+
+### Cloudflare free tier
+
+Designed to run cleanly on the Workers free tier (100k req/day, 1M Durable Object invocations/month). Built-in protections:
+
+- Rooms hibernate when empty — Durable Object alarms stop scheduling once the last player leaves.
+- Per-socket input rate limit (60 msg/s) prevents a misbehaving client from inflating DO request counts.
+- Single 30 Hz simulation tick produces snapshots at 20 Hz; client interpolation hides the gap.
+- Concurrent room cap (`MAX_ROOMS` constant) protects against a single attacker spawning many DO instances by repeatedly changing `?room=`.
+
+If your free tier still drains too fast, raise `SERVER_TICK_MS` in `shared/constants.ts` (e.g. from 33 to 50) — the client interpolates so the visual hit is small.
 
 ## License
 

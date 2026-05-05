@@ -2,7 +2,6 @@ name = "neon-drift-server"
 main = "server/index.ts"
 compatibility_date = "2026-04-01"
 compatibility_flags = ["nodejs_compat"]
-account_id = "baa499e301644fcde7ae725a23d9d17f"
 
 [[durable_objects.bindings]]
 name = "ROOM"

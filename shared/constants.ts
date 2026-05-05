@@ -90,3 +90,18 @@ export const SHIP_COLORS: readonly string[] = [
 export const WS_CLOSE_ROOM_FULL = 4001;
 export const WS_CLOSE_PROTOCOL_ERROR = 4002;
 export const WS_CLOSE_GAME_OVER = 4003;
+export const WS_CLOSE_RATE_LIMITED = 4004;
+
+/**
+ * Per-socket message rate cap. Client sends inputs at ~10 Hz; we leave ~3x
+ * headroom for jitter and one-off pings. Anything beyond is treated as abuse
+ * and the socket gets closed — keeps Durable Object request counts bounded
+ * even under a misbehaving / hostile client.
+ */
+export const WS_INPUT_RATE_LIMIT_PER_S = 30;
+/** Max raw WS frame size accepted from a client (bytes). Inputs are tiny. */
+export const WS_MAX_MESSAGE_BYTES = 1024;
+/** Max characters in a user-supplied room name. */
+export const MAX_ROOM_NAME_LEN = 32;
+/** Allowed characters in a room name (alphanumeric, dash, underscore). */
+export const ROOM_NAME_PATTERN = /^[A-Za-z0-9_-]+$/;

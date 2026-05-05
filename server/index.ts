@@ -6,9 +6,14 @@ import {
   type ServerMessage,
 } from '../shared/protocol.ts';
 import {
+  MAX_ROOM_NAME_LEN,
+  ROOM_NAME_PATTERN,
   SERVER_TICK_MS,
   WS_CLOSE_PROTOCOL_ERROR,
+  WS_CLOSE_RATE_LIMITED,
   WS_CLOSE_ROOM_FULL,
+  WS_INPUT_RATE_LIMIT_PER_S,
+  WS_MAX_MESSAGE_BYTES,
 } from '../shared/constants.ts';
 
 export interface Env {
@@ -21,6 +26,16 @@ const CORS_HEADERS: Record<string, string> = {
   'Access-Control-Allow-Headers': '*',
 };
 
+/**
+ * Reject pathological room names early so a hostile client can't spawn a
+ * thousand Durable Objects by varying `?room=` — which would burn through
+ * the Cloudflare free tier and never expire (DOs persist after first request).
+ */
+const sanitizeRoomName = (raw: string | null): string => {
+  const candidate = (raw ?? 'lobby').slice(0, MAX_ROOM_NAME_LEN);
+  return ROOM_NAME_PATTERN.test(candidate) ? candidate : 'lobby';
+};
+
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
@@ -31,7 +46,7 @@ export default {
       return new Response('ok', { status: 200, headers: CORS_HEADERS });
     }
     if (url.pathname === '/ws') {
-      const roomName = url.searchParams.get('room') ?? 'lobby';
+      const roomName = sanitizeRoomName(url.searchParams.get('room'));
       const trackId = url.searchParams.get('track') ?? 'mute-avenue';
       const fast = url.searchParams.get('fast') === '1';
       const id = env.ROOM.idFromName(roomName);
@@ -51,11 +66,35 @@ export default {
 
 type ConnAttachment = { connId: string };
 
+/**
+ * Token-bucket rate limit per WebSocket. We refill `WS_INPUT_RATE_LIMIT_PER_S`
+ * tokens/second up to a small burst budget. Anything beyond closes the socket
+ * with WS_CLOSE_RATE_LIMITED — protects DO request count under abuse.
+ */
+type RateState = { tokens: number; lastRefillMs: number };
+const BURST = WS_INPUT_RATE_LIMIT_PER_S; // 1s of headroom
+
 export class Room {
   private state: DurableObjectState;
   private core: RoomCore;
   private connSeq = 0;
   private lastTickMs = 0;
+  private rates = new WeakMap<WebSocket, RateState>();
+
+  private allow(ws: WebSocket): boolean {
+    const now = Date.now();
+    let r = this.rates.get(ws);
+    if (!r) {
+      r = { tokens: BURST, lastRefillMs: now };
+      this.rates.set(ws, r);
+    }
+    const elapsed = (now - r.lastRefillMs) / 1000;
+    r.tokens = Math.min(BURST, r.tokens + elapsed * WS_INPUT_RATE_LIMIT_PER_S);
+    r.lastRefillMs = now;
+    if (r.tokens < 1) return false;
+    r.tokens -= 1;
+    return true;
+  }
 
   constructor(state: DurableObjectState) {
     this.state = state;
@@ -128,6 +167,14 @@ export class Room {
 
   webSocketMessage(ws: WebSocket, raw: string | ArrayBuffer): void {
     if (typeof raw !== 'string') return;
+    if (raw.length > WS_MAX_MESSAGE_BYTES) {
+      this.closeWith(ws, WS_CLOSE_PROTOCOL_ERROR, 'message too large');
+      return;
+    }
+    if (!this.allow(ws)) {
+      this.closeWith(ws, WS_CLOSE_RATE_LIMITED, 'rate limited');
+      return;
+    }
     const att = ws.deserializeAttachment() as ConnAttachment | null;
     if (!att) return;
     const msg = decodeClient(raw);
@@ -191,15 +238,22 @@ export class Room {
 
   async alarm(): Promise<void> {
     const now = Date.now();
-    const dt = this.lastTickMs === 0 ? 1 / 30 : Math.min(0.1, (now - this.lastTickMs) / 1000);
+    // While WAITING we only need to bleed `startsIn`; tick once a second instead
+    // of 10× to keep DO request counts low on the free tier. step() is safe with
+    // larger dt during WAITING — it just decrements `startsIn` linearly.
+    const waitingDt = this.lastTickMs === 0 ? 1 : Math.min(2, (now - this.lastTickMs) / 1000);
+    const racingDt = this.lastTickMs === 0 ? 1 / 30 : Math.min(0.1, (now - this.lastTickMs) / 1000);
+    const dt = this.core.phase === 'WAITING' ? waitingDt : racingDt;
     this.lastTickMs = now;
     const out = this.core.step(dt);
     if (out.snapshot) this.broadcast(out.snapshot);
     for (const ev of out.events) this.broadcast(ev);
-    // Always reschedule unless room is empty.
+    // Reschedule unless the room is fully idle (no sockets AND back in WAITING).
     const sockets = this.state.getWebSockets();
-    if (sockets.length > 0 || this.core.phase !== 'WAITING') {
-      await this.state.storage.setAlarm(now + SERVER_TICK_MS);
+    const empty = sockets.length === 0 && this.core.phase === 'WAITING';
+    if (!empty) {
+      const nextMs = this.core.phase === 'WAITING' ? 1000 : SERVER_TICK_MS;
+      await this.state.storage.setAlarm(now + nextMs);
     }
   }
 
