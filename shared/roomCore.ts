@@ -67,6 +67,8 @@ export type PlayerEntry = {
   readonly ready: boolean;
   /** Last reported round-trip time in ms, or null if not measured. */
   readonly rtt: number | null;
+  /** Track the player wants to play. Default = room's track on join. */
+  readonly trackVote: string;
 };
 
 export type StepResult = {
@@ -173,7 +175,14 @@ export class RoomCore {
     if (session) {
       for (const [pid, entry] of this.players) {
         if (entry.session === session && entry.bot) {
-          this.players.set(pid, { ...entry, connId, bot: false, ready: false, rtt: null });
+          this.players.set(pid, {
+            ...entry,
+            connId,
+            bot: false,
+            ready: false,
+            rtt: null,
+            trackVote: this.track.id,
+          });
           // Resume normal input processing for this vehicle.
           if (!this.inputs.has(pid)) this.inputs.set(pid, NEUTRAL_INPUT);
           this.lastHumanInputAt = this.raceTime;
@@ -215,6 +224,7 @@ export class RoomCore {
       session,
       ready: false,
       rtt: null,
+      trackVote: this.track.id,
     });
     // No auto-start by default — players use the Start now button or the
     // per-player Ready flag to trigger the race when they're good to go.
@@ -284,6 +294,7 @@ export class RoomCore {
         session: null,
         ready: true,
         rtt: null,
+        trackVote: this.track.id,
       });
     }
     // Spawn vehicles.
@@ -519,7 +530,53 @@ export class RoomCore {
       cls: p.cls,
       ready: p.ready,
       rtt: p.rtt,
+      trackVote: p.trackVote,
     }));
+  }
+
+  /**
+   * The "host" is the longest-connected human (insertion order in the
+   * players map). They get exclusive control over Start Now and lap count.
+   * Returns null if the room has no humans.
+   */
+  hostId(): string | null {
+    for (const p of this.players.values()) {
+      if (!p.bot && p.connId !== null) return p.id;
+    }
+    return null;
+  }
+
+  /** True if `connId` corresponds to the current host. */
+  isHost(connId: string): boolean {
+    const host = this.hostId();
+    if (host === null) return false;
+    const entry = this.players.get(host);
+    return entry?.connId === connId;
+  }
+
+  /**
+   * Tally trackVotes among connected humans. Returns the trackId with the
+   * most votes; ties (or no humans) keep the current track.
+   */
+  private tallyTrackWinner(): string {
+    const counts = new Map<string, number>();
+    for (const p of this.players.values()) {
+      if (p.bot || p.connId === null) continue;
+      counts.set(p.trackVote, (counts.get(p.trackVote) ?? 0) + 1);
+    }
+    let winner = this.track.id;
+    let winnerVotes = counts.get(this.track.id) ?? 0;
+    let tied = false;
+    for (const [trackId, votes] of counts) {
+      if (votes > winnerVotes) {
+        winner = trackId;
+        winnerVotes = votes;
+        tied = false;
+      } else if (votes === winnerVotes && trackId !== winner) {
+        tied = true;
+      }
+    }
+    return tied ? this.track.id : winner;
   }
 
   /** Update a player's reported RTT. No-op if rtt change is below 10 ms. */
@@ -555,26 +612,47 @@ export class RoomCore {
   }
 
   /**
-   * Switch the active track in-place. Only allowed during WAITING — players
-   * keep their ids/sessions so reconnection still works. Returns true if the
-   * track was actually changed.
+   * Record a player's track vote and re-tally. Returns whether the active
+   * track actually changed as a result. WAITING-only so a vote can't
+   * suddenly swap the track mid-race.
    */
-  setTrack(trackId: string): boolean {
-    if (this.phase !== 'WAITING') return false;
-    if (trackId === this.track.id) return false;
+  setTrackVote(connId: string, trackId: string): { voteRecorded: boolean; trackChanged: boolean } {
+    if (this.phase !== 'WAITING') return { voteRecorded: false, trackChanged: false };
+    // Validate the trackId before recording — we don't want garbage in the tally.
     try {
-      this.track = findTrack(trackId);
+      findTrack(trackId);
     } catch {
-      return false;
+      return { voteRecorded: false, trackChanged: false };
     }
+    let voteRecorded = false;
+    for (const [pid, entry] of this.players) {
+      if (entry.connId === connId && !entry.bot) {
+        if (entry.trackVote === trackId) return { voteRecorded: false, trackChanged: false };
+        this.players.set(pid, { ...entry, trackVote: trackId });
+        voteRecorded = true;
+        break;
+      }
+    }
+    if (!voteRecorded) return { voteRecorded: false, trackChanged: false };
+    const winner = this.tallyTrackWinner();
+    if (winner === this.track.id) return { voteRecorded, trackChanged: false };
+    this.applyTrack(winner);
+    return { voteRecorded, trackChanged: true };
+  }
+
+  /**
+   * Internal: actually swap the track. Caller is responsible for gating.
+   * Resets ready flags (different track = different commitment) and clears
+   * non-winning votes back to the new active track... no, actually we
+   * preserve people's votes so they can keep advocating for their pick.
+   */
+  private applyTrack(trackId: string): void {
+    this.track = findTrack(trackId);
     this.config = buildRaceConfig(this.track, this.totalLaps);
     this.rebuildPickups();
-    // Switching track invalidates lobby readiness (different track → different
-    // commitment). Reset everyone to not-ready.
     for (const [pid, entry] of this.players) {
       if (entry.ready) this.players.set(pid, { ...entry, ready: false });
     }
-    return true;
   }
 
   /** Change race length. Only allowed during WAITING; resets ready flags. */

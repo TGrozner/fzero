@@ -55,8 +55,8 @@ describe('reducer', () => {
         countdown: 3,
         startsIn: 20,
         players: [
-          { id: 'p1', name: 'Tom', color: '#fff', bot: false, cls: 'balanced', ready: false, rtt: null },
-          { id: 'p2', name: 'Bob', color: '#000', bot: false, cls: 'balanced', ready: false, rtt: null },
+          { id: 'p1', name: 'Tom', color: '#fff', bot: false, cls: 'balanced', ready: false, rtt: null, trackVote: 'mute-avenue' },
+          { id: 'p2', name: 'Bob', color: '#000', bot: false, cls: 'balanced', ready: false, rtt: null, trackVote: 'mute-avenue' },
         ],
       },
     });

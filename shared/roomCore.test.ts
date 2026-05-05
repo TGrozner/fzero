@@ -41,23 +41,54 @@ describe('RoomCore lifecycle', () => {
     expect(result.humans).toBe(0);
   });
 
-  it('setTrack swaps the active track in WAITING and clears ready flags', () => {
+  it('setTrackVote with one human swaps immediately (sole vote = unanimous)', () => {
     const r = new RoomCore('mute-avenue');
     r.addHuman('c1', 'A', '#3aa0ff');
     r.setReady('c1', true);
-    expect(r.setTrack('big-blue')).toBe(true);
+    const out = r.setTrackVote('c1', 'big-blue');
+    expect(out.voteRecorded).toBe(true);
+    expect(out.trackChanged).toBe(true);
     expect(r.track.id).toBe('big-blue');
     const me = [...r.players.values()][0];
     expect(me?.ready).toBe(false);
   });
 
-  it('setTrack refuses unknown ids and rejects when not WAITING', () => {
+  it('setTrackVote needs a majority — 1 vs 1 keeps the current track', () => {
+    const r = new RoomCore('mute-avenue');
+    r.addHuman('c1', 'A', '#3aa0ff'); // votes mute-avenue (default)
+    r.addHuman('c2', 'B', '#ff4040'); // votes mute-avenue (default)
+    expect(r.track.id).toBe('mute-avenue');
+    // c2 splits vote 1/1: tied → no change.
+    const out = r.setTrackVote('c2', 'big-blue');
+    expect(out.voteRecorded).toBe(true);
+    expect(out.trackChanged).toBe(false);
+    expect(r.track.id).toBe('mute-avenue');
+    // c1 also defects → 2/0 for big-blue → changes.
+    const out2 = r.setTrackVote('c1', 'big-blue');
+    expect(out2.trackChanged).toBe(true);
+    expect(r.track.id).toBe('big-blue');
+  });
+
+  it('setTrackVote rejects unknown ids and is rejected mid-race', () => {
     const r = new RoomCore('mute-avenue');
     r.addHuman('c1', 'A', '#3aa0ff');
-    expect(r.setTrack('does-not-exist')).toBe(false);
+    expect(r.setTrackVote('c1', 'does-not-exist').voteRecorded).toBe(false);
     expect(r.track.id).toBe('mute-avenue');
     r.startRace();
-    expect(r.setTrack('big-blue')).toBe(false);
+    expect(r.setTrackVote('c1', 'big-blue').voteRecorded).toBe(false);
+  });
+
+  it('hostId is the longest-connected human and transfers when they leave', () => {
+    const r = new RoomCore();
+    expect(r.hostId()).toBe(null);
+    const a = r.addHuman('c1', 'A', '#3aa0ff');
+    const b = r.addHuman('c2', 'B', '#ff4040');
+    expect(r.hostId()).toBe(a.id);
+    expect(r.isHost('c1')).toBe(true);
+    expect(r.isHost('c2')).toBe(false);
+    r.removeHuman('c1');
+    expect(r.hostId()).toBe(b.id);
+    expect(r.isHost('c2')).toBe(true);
   });
 
   it('setLaps applies a valid lap count and rejects bogus values', () => {

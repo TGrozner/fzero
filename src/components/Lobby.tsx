@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { TRACKS } from '../../shared/track.ts';
 import { SHIP_CLASSES, type ShipClass } from '../../shared/constants.ts';
 import { ALLOWED_LAPS } from '../../shared/roomCore.ts';
@@ -11,6 +11,7 @@ type Player = {
   cls: ShipClass;
   ready: boolean;
   rtt: number | null;
+  trackVote: string;
 };
 
 const pingColor = (rtt: number | null): string => {
@@ -46,6 +47,9 @@ const CLS_FULL: Record<ShipClass, string> = {
   balanced: 'Balanced',
 };
 
+const trackName = (id: string): string =>
+  TRACKS.find((t) => t.id === id)?.name ?? id;
+
 /**
  * Build the invite URL the host can share. We use the current window's
  * origin + path, force a `?room=...` param so anyone clicking joins the
@@ -76,8 +80,18 @@ export function Lobby({
 }: Props) {
   const humans = players.filter((p) => !p.bot);
   const me = myId ? humans.find((p) => p.id === myId) ?? null : null;
+  // Host = longest-connected human; same logic the server uses to gate
+  // start_now / set_laps. Whoever's first in the players list wins.
+  const hostId = humans[0]?.id ?? null;
+  const isHost = me !== null && me.id === hostId;
   const allReady = humans.length > 0 && humans.every((p) => p.ready);
   const [copied, setCopied] = useState(false);
+
+  const voteTally = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const p of humans) counts.set(p.trackVote, (counts.get(p.trackVote) ?? 0) + 1);
+    return [...counts.entries()].sort((a, b) => b[1] - a[1]);
+  }, [humans]);
 
   useEffect(() => {
     if (!copied) return;
@@ -114,10 +128,10 @@ export function Lobby({
 
       <div className="lobby-info" style={{ display: 'flex', gap: 16, alignItems: 'center', justifyContent: 'center', flexWrap: 'wrap' }}>
         <label style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-          Track:
+          Your track vote:
           <select
             data-testid="track-select"
-            value={trackId}
+            value={me?.trackVote ?? trackId}
             onChange={(e) => onSetTrack(e.target.value)}
             style={{ minWidth: 140 }}
           >
@@ -128,11 +142,15 @@ export function Lobby({
             ))}
           </select>
         </label>
-        <label style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+        <label
+          style={{ display: 'flex', gap: 6, alignItems: 'center', opacity: isHost ? 1 : 0.6 }}
+          title={isHost ? '' : 'Only the host can change the lap count'}
+        >
           Laps:
           <select
             data-testid="laps-select"
             value={laps}
+            disabled={!isHost}
             onChange={(e) => onSetLaps(Number(e.target.value))}
           >
             {ALLOWED_LAPS.map((n) => (
@@ -143,6 +161,19 @@ export function Lobby({
           </select>
         </label>
       </div>
+
+      {voteTally.length > 0 && (
+        <div className="lobby-info" data-testid="vote-tally" style={{ fontSize: 12, opacity: 0.85 }}>
+          Votes: {voteTally.map(([id, n], i) => (
+            <span key={id} style={{ marginLeft: i === 0 ? 0 : 8 }}>
+              <strong style={{ color: id === trackId ? '#3eff8b' : 'inherit' }}>{trackName(id)}</strong>
+              {' '}
+              <span style={{ opacity: 0.7 }}>×{n}</span>
+            </span>
+          ))}
+          <span style={{ marginLeft: 12, opacity: 0.7 }}>→ playing <strong>{trackName(trackId)}</strong></span>
+        </div>
+      )}
 
       {me && (
         <div
@@ -177,7 +208,9 @@ export function Lobby({
           ? 'Waiting for the first pilot…'
           : allReady
             ? 'Everyone ready — starting…'
-            : 'Click Ready when you’re set, or hit Start now to bypass.'}
+            : isHost
+              ? 'Click Ready, or hit Start now to bypass.'
+              : 'Click Ready when you’re set. The host can also Start now.'}
       </div>
 
       <ul
@@ -209,8 +242,26 @@ export function Lobby({
               }}
             />
             <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>
+              {p.id === hostId && (
+                <span aria-label="host" title="Host" style={{ marginRight: 4 }}>★</span>
+              )}
               {p.name}
               {p.id === myId && <span style={{ opacity: 0.6 }}> (you)</span>}
+            </span>
+            <span
+              aria-label={`voted for ${trackName(p.trackVote)}`}
+              data-testid={`vote-${p.id}`}
+              style={{
+                fontSize: 10,
+                opacity: 0.6,
+                fontStyle: 'italic',
+                maxWidth: 90,
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+              }}
+            >
+              {trackName(p.trackVote)}
             </span>
             <span
               aria-label={`class: ${p.cls}`}
@@ -258,9 +309,11 @@ export function Lobby({
             {me.ready ? '✓ Ready' : 'Ready'}
           </button>
         )}
-        <button onClick={onStartNow} data-testid="start-now" style={{ minWidth: 110 }}>
-          Start now
-        </button>
+        {isHost && (
+          <button onClick={onStartNow} data-testid="start-now" style={{ minWidth: 110 }}>
+            Start now
+          </button>
+        )}
         <button onClick={onCopyInvite} data-testid="copy-invite" style={{ minWidth: 140 }}>
           {copied ? 'Copied!' : 'Copy invite link'}
         </button>

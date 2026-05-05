@@ -96,6 +96,7 @@ export function App() {
     music: profile.music,
   }));
   const [connectRequested, setConnectRequested] = useState(false);
+  const [connectAsSpectator, setConnectAsSpectator] = useState(false);
   const [careerStats, setCareerStats] = useState<CareerStats>(loadCareerStats);
   const lastRecordedResultsRef = useRef<readonly unknown[] | null>(null);
 
@@ -172,12 +173,15 @@ export function App() {
     state.color,
     state.roomName,
     state.cls,
+    connectAsSpectator,
   );
 
   const handleStart = useCallback(async () => {
     getMixer().unlock();
-    // Pre-flight the room: if a race is already in progress, surface a clear
-    // "wait then retry" message instead of a silent reconnect storm.
+    // Pre-flight the room: if a race is already in progress we silently
+    // connect as a spectator so the user lands in the action right away
+    // (and gets auto-promoted into the next race).
+    let asSpectator = false;
     try {
       const baseUrl = (() => {
         const env = (import.meta as { env?: Record<string, string | undefined> }).env;
@@ -194,33 +198,37 @@ export function App() {
       const room = state.roomName ? `?room=${encodeURIComponent(state.roomName)}` : '';
       const res = await fetch(`${baseUrl}/status${room}`);
       if (res.ok) {
-        const j: { phase: string; humans: number } = await res.json();
-        if (j.phase !== 'WAITING') {
-          dispatch({
-            type: 'CONNECTION_ERROR',
-            error: `Race already in progress in this room (${j.humans} human${j.humans === 1 ? '' : 's'}). Wait a moment and retry.`,
-          });
-          return;
-        }
+        const j: { phase: string } = await res.json();
+        asSpectator = j.phase !== 'WAITING';
       }
     } catch {
-      // /status is best-effort; if it fails (e.g. dev server, old worker), just
-      // proceed to connect and let the WS error path handle any rejection.
+      // /status is best-effort; if it fails, attempt as a regular player.
     }
+    setConnectAsSpectator(asSpectator);
     setConnectRequested(true);
   }, [state.roomName]);
 
   const handleLeave = useCallback(() => {
     setConnectRequested(false);
+    setConnectAsSpectator(false);
     socket.disconnect();
     dispatch({ type: 'SET_VIEW', view: 'menu' });
   }, [socket]);
 
+  // The server now auto-promotes connected results-screen viewers when the
+  // FINISHED → WAITING cooldown elapses, so we can just send everyone back
+  // to the lobby view and let the welcome arrive naturally. Falls back to a
+  // hard reconnect if the connection somehow died.
   const handleAgain = useCallback(() => {
+    if (state.status === 'connected') {
+      dispatch({ type: 'SET_VIEW', view: 'lobby' });
+      return;
+    }
     setConnectRequested(false);
+    setConnectAsSpectator(false);
     socket.disconnect();
     setTimeout(() => setConnectRequested(true), 120);
-  }, [socket]);
+  }, [socket, state.status]);
 
   // Lobby ping: 30 s cadence so other players see your RTT next to your name.
   // Race already pings every 10 s for the local HUD; this just keeps something

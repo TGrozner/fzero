@@ -81,6 +81,9 @@ export type ClientState = {
   rttMs: number | null;
   /** Last error to display in a banner. */
   error: string | null;
+  /** True if the local connection is currently a spectator (joined a race
+   *  in progress). Cleared on the next welcome with spectator=false. */
+  spectator: boolean;
   /** KOs the local player has scored — retained briefly so the HUD can show them. */
   myKos: readonly { id: string; at: number }[];
   /** Cumulative count of KOs the local player has scored in the current race.
@@ -116,6 +119,7 @@ export const buildInitialClientState = (): ClientState => ({
   countdown: 0,
   startsIn: -1,
   laps: 3,
+  spectator: false,
   players: {},
   snapshots: [],
   racersLeft: 99,
@@ -207,12 +211,13 @@ const applyServer = (
       for (const p of msg.players) players[p.id] = p;
       return {
         ...state,
-        myId: msg.yourId,
+        myId: msg.yourId === '' ? null : msg.yourId,
         trackId: msg.track,
         laps: msg.laps,
         phase: msg.phase,
         countdown: msg.countdown,
         startsIn: msg.startsIn,
+        spectator: msg.spectator === true,
         players,
         view: msg.phase === 'WAITING' ? 'lobby' : 'race',
       };

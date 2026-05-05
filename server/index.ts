@@ -6,9 +6,11 @@ import {
   type ServerMessage,
 } from '../shared/protocol.ts';
 import {
+  DEFAULT_SHIP_CLASS,
   MAX_ROOM_NAME_LEN,
   ROOM_NAME_PATTERN,
   SERVER_TICK_MS,
+  type ShipClass,
   WS_CLOSE_PROTOCOL_ERROR,
   WS_CLOSE_RATE_LIMITED,
   WS_CLOSE_ROOM_FULL,
@@ -57,14 +59,16 @@ export default {
     }
     if (url.pathname === '/ws') {
       const roomName = sanitizeRoomName(url.searchParams.get('room'));
-      const trackId = url.searchParams.get('track') ?? 'mute-avenue';
-      const fast = url.searchParams.get('fast') === '1';
       const id = env.ROOM.idFromName(roomName);
       const stub = env.ROOM.get(id);
-      const fwd = new Request(
-        `https://room/ws?track=${encodeURIComponent(trackId)}${fast ? '&fast=1' : ''}`,
-        request,
-      );
+      // Forward every query param except `room` (the DO is identified by
+      // the binding now) so session reconnects, spectator flags, fast-mode,
+      // and track overrides all reach the Room.
+      const inner = new URL('https://room/ws');
+      for (const [k, v] of url.searchParams) {
+        if (k !== 'room') inner.searchParams.set(k, v);
+      }
+      const fwd = new Request(inner.toString(), request);
       return stub.fetch(fwd);
     }
     if (url.pathname === '/') {
@@ -74,7 +78,28 @@ export default {
   },
 };
 
-type ConnAttachment = { connId: string };
+/**
+ * Per-WebSocket persisted state.
+ *
+ * `helloInfo` is captured on the first hello so that when the room cycles
+ * from FINISHED → WAITING (auto-cooldown) we can promote every still-open
+ * connection — both regular players AND spectators who joined mid-race —
+ * back into core.players without a disconnect/reconnect dance.
+ *
+ * `spectator` is true only while the connection is observing without a
+ * vehicle. It flips to false the moment the server promotes them to a
+ * player (start of next WAITING phase).
+ */
+type ConnAttachment = {
+  connId: string;
+  helloInfo?: {
+    name: string;
+    color: string;
+    cls: ShipClass;
+    session: string | null;
+  };
+  spectator?: boolean;
+};
 
 /**
  * Token-bucket rate limit per WebSocket. We refill `WS_INPUT_RATE_LIMIT_PER_S`
@@ -141,15 +166,10 @@ export class Room {
     if (upgrade?.toLowerCase() !== 'websocket') {
       return new Response('expected websocket', { status: 426 });
     }
-    // If the previous race is over, reset back to a fresh lobby + close any lingering sockets.
-    if (this.core.phase === 'FINISHED') {
-      for (const ws of this.state.getWebSockets()) {
-        try { ws.close(1000, 'race over'); } catch { /* ignore */ }
-      }
-      this.core.resetToWaiting();
-    }
-    // Apply query overrides (only takes effect while WAITING).
-    if (this.core.phase === 'WAITING') {
+    // Apply query overrides (only takes effect while WAITING). Track override
+    // only fires before any human is in the room, so we don't blow away an
+    // active vote tally just because someone joined with a different ?track=.
+    if (this.core.phase === 'WAITING' && this.core.players.size === 0) {
       const fast = url.searchParams.get('fast') === '1';
       const track = url.searchParams.get('track');
       if (track) {
@@ -163,29 +183,37 @@ export class Room {
       // click the Start now button. Production never sets this.
       if (fast) this.core.startsIn = 2;
     }
-    // Allow upgrades during RACING/COUNTDOWN if the client has a known
-    // session token: they may be reconnecting to claim back their bot.
+    // Connection rules:
+    // - ?spectator=1 → always allowed (joins as observer, promoted on next WAITING)
+    // - ?session=X reconnect to a bot-piloted vehicle → allowed mid-race
+    // - otherwise → only during WAITING and only if the room isn't full
     const session = url.searchParams.get('session');
+    const wantsSpectator = url.searchParams.get('spectator') === '1';
     const isReconnect =
       session !== null &&
       this.core.phase !== 'WAITING' &&
-      this.core.phase !== 'FINISHED' &&
       [...this.core.players.values()].some((p) => p.session === session && p.bot);
-    if (
-      !isReconnect &&
-      (this.core.players.size >= 99 || this.core.phase !== 'WAITING')
-    ) {
-      return new Response('room full or already started', {
-        status: 409,
-        headers: CORS_HEADERS,
-      });
+    if (this.core.players.size >= 99 && !wantsSpectator && !isReconnect) {
+      return new Response('room full', { status: 409, headers: CORS_HEADERS });
+    }
+    if (!isReconnect && !wantsSpectator && this.core.phase !== 'WAITING') {
+      // The client should retry with ?spectator=1 to watch and auto-join the
+      // next race; surfacing 409 keeps the contract explicit.
+      return new Response('race already started', { status: 409, headers: CORS_HEADERS });
     }
     const pair = new WebSocketPair();
     const client = pair[0];
     const server = pair[1];
     this.state.acceptWebSocket(server);
     const connId = `c${++this.connSeq}`;
-    server.serializeAttachment({ connId } satisfies ConnAttachment);
+    // Spectator flag is only set when we couldn't have joined as a player
+    // (i.e. we're not in WAITING). In WAITING, even a `?spectator=1` request
+    // becomes a regular player — there's no race to spectate yet.
+    const becomesSpectator = wantsSpectator && this.core.phase !== 'WAITING';
+    server.serializeAttachment({
+      connId,
+      ...(becomesSpectator ? { spectator: true } : {}),
+    } satisfies ConnAttachment);
     return new Response(null, { status: 101, webSocket: client });
   }
 
@@ -207,19 +235,60 @@ export class Room {
       return;
     }
     if (msg.type === 'hello') {
+      const cls: ShipClass = msg.cls ?? DEFAULT_SHIP_CLASS;
+      // Persist the hello on the attachment so the FINISHED → WAITING
+      // auto-promotion knows how to re-add this socket as a player on the
+      // next race without a disconnect/reconnect cycle.
+      const helloInfo = {
+        name: msg.name,
+        color: msg.color,
+        cls,
+        session: msg.session ?? null,
+      };
+      ws.serializeAttachment({ ...att, helloInfo } satisfies ConnAttachment);
+
+      if (att.spectator) {
+        // Don't addHuman — they're observing this race. Send a spectator
+        // welcome with the current state so they can render immediately.
+        ws.send(
+          encode({
+            type: 'welcome',
+            yourId: '',
+            track: this.core.track.id,
+            laps: this.core.totalLaps,
+            players: this.core.playerInfos(),
+            phase: this.core.phase,
+            countdown: this.core.countdown,
+            startsIn: this.core.startsIn,
+            spectator: true,
+          }),
+        );
+        if (this.core.phase === 'RACING' || this.core.phase === 'COUNTDOWN') {
+          ws.send(
+            encode({
+              type: 'snapshot',
+              tick: this.core.tick,
+              time: this.core.raceTime,
+              ships: this.core.snapshotShips(),
+              racersLeft: [...this.core.vehicles.values()].filter((v) => !v.ko && !v.finished).length,
+              pk: this.core.pickupActiveMask(),
+            }),
+          );
+        }
+        this.ensureAlarmScheduled();
+        return;
+      }
+
       try {
         const { id, welcome } = this.core.addHuman(
           att.connId,
-          msg.name,
-          msg.color,
-          msg.session ?? null,
-          msg.cls,
+          helloInfo.name,
+          helloInfo.color,
+          helloInfo.session,
+          helloInfo.cls,
         );
-        // Replace attachment connId with playerId for fast input lookup.
-        ws.serializeAttachment({ connId: att.connId } satisfies ConnAttachment);
         ws.send(encode(welcome));
         this.broadcastExcept(ws, { type: 'players', players: this.core.playerInfos() });
-        // Re-send a snapshot so the reconnecting client can render immediately.
         if (this.core.phase === 'RACING' || this.core.phase === 'COUNTDOWN') {
           ws.send(
             encode({
@@ -248,8 +317,12 @@ export class Room {
       return;
     }
     if (msg.type === 'start_now') {
-      // Any human in the room can start the race when they're good to go.
+      // Host-only: in a multi-player lobby, only the longest-connected human
+      // can override the Ready flow. Any other client clicking the button
+      // (which they shouldn't — the UI hides it for non-hosts — but a
+      // hand-crafted message could) is silently ignored.
       if (this.core.phase !== 'WAITING') return;
+      if (!this.core.isHost(att.connId)) return;
       this.core.startsIn = 0;
       this.broadcast({ type: 'phase', phase: 'WAITING', startsIn: 0 });
       void this.state.storage.setAlarm(Date.now() + 50);
@@ -267,15 +340,20 @@ export class Room {
     }
     if (msg.type === 'set_track') {
       if (typeof msg.trackId !== 'string') return;
-      const changed = this.core.setTrack(msg.trackId);
-      if (changed) {
-        this.broadcast({ type: 'track-changed', trackId: msg.trackId });
+      const { voteRecorded, trackChanged } = this.core.setTrackVote(att.connId, msg.trackId);
+      if (voteRecorded) {
         this.broadcast({ type: 'players', players: this.core.playerInfos() });
+        if (trackChanged) {
+          this.broadcast({ type: 'track-changed', trackId: this.core.track.id });
+        }
       }
       return;
     }
     if (msg.type === 'set_laps') {
+      // Host-only — same rationale as start_now. Lap count is a global
+      // race setting, so only one player should drive it.
       if (typeof msg.laps !== 'number') return;
+      if (!this.core.isHost(att.connId)) return;
       const changed = this.core.setLaps(msg.laps);
       if (changed) {
         this.broadcast({ type: 'laps-changed', laps: this.core.totalLaps });
@@ -323,7 +401,14 @@ export class Room {
     const racingDt = this.lastTickMs === 0 ? 1 / 30 : Math.min(0.4, (now - this.lastTickMs) / 1000);
     const dt = this.core.phase === 'WAITING' ? waitingDt : racingDt;
     this.lastTickMs = now;
+    const phaseBefore = this.core.phase;
     const out = this.core.step(dt);
+    // FINISHED → WAITING transition: promote every still-connected socket
+    // (including spectators that joined mid-race) so the same friend group
+    // can chain races without anyone disconnect-reconnect-ing.
+    if (phaseBefore === 'FINISHED' && this.core.phase === 'WAITING') {
+      this.promoteAllConnected();
+    }
     if (out.snapshot) this.broadcast(out.snapshot);
     for (const ev of out.events) this.broadcast(ev);
     // Reschedule unless the room is fully idle (no sockets AND back in WAITING).
@@ -332,6 +417,40 @@ export class Room {
     if (!empty) {
       const nextMs = this.core.phase === 'WAITING' ? 1000 : SERVER_TICK_MS;
       await this.state.storage.setAlarm(now + nextMs);
+    }
+  }
+
+  /**
+   * Promote all open sockets into players. Called at the start of every fresh
+   * lobby (after the FINISHED cooldown) so connected results-screen viewers
+   * AND spectators auto-rejoin without a disconnect/reconnect dance. Each
+   * socket gets a personalized welcome with their freshly-allocated player id.
+   */
+  private promoteAllConnected(): void {
+    let anyAdded = false;
+    for (const ws of this.state.getWebSockets()) {
+      const att = ws.deserializeAttachment() as ConnAttachment | null;
+      if (!att?.helloInfo) continue;
+      const already = [...this.core.players.values()].some((p) => p.connId === att.connId);
+      if (already) continue;
+      try {
+        const { welcome } = this.core.addHuman(
+          att.connId,
+          att.helloInfo.name,
+          att.helloInfo.color,
+          att.helloInfo.session,
+          att.helloInfo.cls,
+        );
+        ws.serializeAttachment({ ...att, spectator: false } satisfies ConnAttachment);
+        ws.send(encode(welcome));
+        anyAdded = true;
+      } catch {
+        // Room full or otherwise rejected — skip; the socket stays alive
+        // and will retry on the next FINISHED → WAITING transition.
+      }
+    }
+    if (anyAdded) {
+      this.broadcast({ type: 'players', players: this.core.playerInfos() });
     }
   }
 

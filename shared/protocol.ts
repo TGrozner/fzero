@@ -45,6 +45,8 @@ export type PlayerInfoMsg = {
   readonly ready: boolean;
   /** Last reported round-trip time in ms, or null if not measured. */
   readonly rtt: number | null;
+  /** Track the player voted for (default = the room's current track). */
+  readonly trackVote: string;
 };
 
 /** Client → Server messages. */
@@ -54,6 +56,7 @@ export type ClientMessage =
   | { type: 'ping'; ts: number }
   | { type: 'start_now' }
   | { type: 'set_ready'; ready: boolean }
+  /** Cast a vote for a track. The room's active track follows the majority. */
   | { type: 'set_track'; trackId: string }
   | { type: 'set_class'; cls: ShipClass }
   | { type: 'set_laps'; laps: number }
@@ -91,6 +94,12 @@ export type ServerMessage =
        * previous bot-controlled vehicle is being handed back).
        */
       reconnected?: boolean;
+      /**
+       * True if this client connected as a spectator (joined a room while a
+       * race was already in progress). Spectators receive snapshots but
+       * have no vehicle until the next race starts.
+       */
+      spectator?: boolean;
     }
   | { type: 'players'; players: PlayerInfoMsg[] }
   | {

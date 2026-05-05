@@ -39,6 +39,7 @@ export const useGameSocket = (
   color: string,
   roomName: string,
   cls: ShipClass,
+  asSpectator: boolean = false,
 ): SocketAPI => {
   const ref = useRef<GameSocket | null>(null);
   const sessionRef = useRef<string>(getOrCreateSession());
@@ -99,7 +100,7 @@ export const useGameSocket = (
       });
       ref.current = sock;
       dispatch({ type: 'CONNECTING' });
-      sock.connect(buildUrl(trackId, sessionRef.current, roomName));
+      sock.connect(buildUrl(trackId, sessionRef.current, roomName, asSpectator));
     };
     open();
     return () => {
@@ -110,12 +111,12 @@ export const useGameSocket = (
       ref.current?.disconnect();
       ref.current = null;
     };
-  }, [enabled, trackId, pseudo, color, roomName, cls, dispatch]);
+  }, [enabled, trackId, pseudo, color, roomName, cls, asSpectator, dispatch]);
 
   return {
     send: (msg) => ref.current?.send(msg),
     connect: () => {
-      ref.current?.connect(buildUrl(trackId, sessionRef.current, roomName));
+      ref.current?.connect(buildUrl(trackId, sessionRef.current, roomName, asSpectator));
     },
     disconnect: () => {
       if (reconnectTimer.current !== null) {
@@ -129,10 +130,16 @@ export const useGameSocket = (
   };
 };
 
-const buildUrl = (trackId: string, session: string, roomName: string): string => {
+const buildUrl = (
+  trackId: string,
+  session: string,
+  roomName: string,
+  asSpectator: boolean,
+): string => {
   let base = `${resolveServerUrl()}?track=${encodeURIComponent(trackId)}`;
   base += `&session=${encodeURIComponent(session)}`;
   if (roomName) base += `&room=${encodeURIComponent(roomName)}`;
+  if (asSpectator) base += '&spectator=1';
   if (typeof window !== 'undefined') {
     const params = new URLSearchParams(window.location.search);
     if (params.get('fast') === '1') base += '&fast=1';

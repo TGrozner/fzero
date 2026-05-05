@@ -180,6 +180,28 @@ export function Race({ state, dispatch, socket, onLeave }: Props) {
       <canvas ref={canvasRef} />
       <canvas ref={minimapRef} className="minimap" data-testid="minimap" />
       <HUD state={state} />
+      {state.spectator && (
+        <div
+          data-testid="spectator-banner"
+          style={{
+            position: 'absolute',
+            top: 12,
+            left: '50%',
+            transform: 'translateX(-50%)',
+            padding: '6px 14px',
+            borderRadius: 6,
+            background: 'rgba(0, 0, 0, 0.6)',
+            border: '1px solid rgba(255, 255, 255, 0.18)',
+            color: '#fff',
+            fontSize: 13,
+            letterSpacing: '0.14em',
+            textTransform: 'uppercase',
+            pointerEvents: 'none',
+          }}
+        >
+          Spectating · joining next race
+        </div>
+      )}
       {showCountdown && (
         <div className="countdown-overlay" data-testid="countdown">
           <div className="number">
