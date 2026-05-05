@@ -206,10 +206,12 @@ export function App() {
         <Lobby
           trackId={state.trackId}
           players={Object.values(state.players)}
-          startsIn={state.startsIn}
+          myId={state.myId}
           roomName={state.roomName}
           onCancel={handleLeave}
           onStartNow={() => socket.send({ type: 'start_now' })}
+          onSetReady={(ready) => socket.send({ type: 'set_ready', ready })}
+          onSetTrack={(trackId) => socket.send({ type: 'set_track', trackId })}
         />
       )}
       {state.view === 'race' && (

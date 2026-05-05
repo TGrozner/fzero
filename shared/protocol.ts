@@ -42,6 +42,7 @@ export type PlayerInfoMsg = {
   readonly color: string;
   readonly bot: boolean;
   readonly cls: ShipClass;
+  readonly ready: boolean;
 };
 
 /** Client → Server messages. */
@@ -49,7 +50,9 @@ export type ClientMessage =
   | { type: 'hello'; name: string; color: string; cls?: ShipClass; session?: string }
   | { type: 'input'; ts: number; in: InputBits }
   | { type: 'ping'; ts: number }
-  | { type: 'start_now' };
+  | { type: 'start_now' }
+  | { type: 'set_ready'; ready: boolean }
+  | { type: 'set_track'; trackId: string };
 
 /** Encoded input as a tiny bit/short tuple. */
 export type InputBits = {
@@ -99,6 +102,7 @@ export type ServerMessage =
       pk: number;
     }
   | { type: 'phase'; phase: RoomPhase; countdown?: number; startsIn?: number }
+  | { type: 'track-changed'; trackId: string }
   | { type: 'ko'; id: string; by: string | null; time: number }
   | {
       /**

@@ -128,16 +128,17 @@ export class Room {
     // Apply query overrides (only takes effect while WAITING).
     if (this.core.phase === 'WAITING') {
       const fast = url.searchParams.get('fast') === '1';
-      if (fast) this.core.lobbyAutoStartS = 2;
       const track = url.searchParams.get('track');
       if (track) {
         try {
-          this.core = new RoomCore(track, 50, this.core.lobbyAutoStartS);
-          if (fast) this.core.lobbyAutoStartS = 2;
+          this.core = new RoomCore(track);
         } catch {
           // unknown track id — ignore and keep default
         }
       }
+      // `?fast=1` is for e2e/CI: arms a 2 s auto-start so tests don't have to
+      // click the Start now button. Production never sets this.
+      if (fast) this.core.startsIn = 2;
     }
     // Allow upgrades during RACING/COUNTDOWN if the client has a known
     // session token: they may be reconnecting to claim back their bot.
@@ -224,13 +225,30 @@ export class Room {
       return;
     }
     if (msg.type === 'start_now') {
-      // Any human in the room can fast-forward the lobby. The auto-start
-      // timer remains as the default safety net for randoms in `lobby`.
+      // Any human in the room can start the race when they're good to go.
       if (this.core.phase !== 'WAITING') return;
       this.core.startsIn = 0;
       this.broadcast({ type: 'phase', phase: 'WAITING', startsIn: 0 });
-      // Tick now instead of waiting up to a full WAITING beat (1 Hz).
       void this.state.storage.setAlarm(Date.now() + 50);
+      return;
+    }
+    if (msg.type === 'set_ready') {
+      const { allReady, humans } = this.core.setReady(att.connId, msg.ready === true);
+      this.broadcast({ type: 'players', players: this.core.playerInfos() });
+      if (allReady && humans >= 1) {
+        this.core.startsIn = 0;
+        this.broadcast({ type: 'phase', phase: 'WAITING', startsIn: 0 });
+        void this.state.storage.setAlarm(Date.now() + 50);
+      }
+      return;
+    }
+    if (msg.type === 'set_track') {
+      if (typeof msg.trackId !== 'string') return;
+      const changed = this.core.setTrack(msg.trackId);
+      if (changed) {
+        this.broadcast({ type: 'track-changed', trackId: msg.trackId });
+        this.broadcast({ type: 'players', players: this.core.playerInfos() });
+      }
       return;
     }
   }

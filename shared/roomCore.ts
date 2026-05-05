@@ -63,6 +63,8 @@ export type PlayerEntry = {
    * client can reclaim its vehicle by sending the same token in `hello`.
    */
   readonly session: string | null;
+  /** Lobby ready flag. When all humans are ready the race auto-starts. */
+  readonly ready: boolean;
 };
 
 export type StepResult = {
@@ -165,7 +167,7 @@ export class RoomCore {
     if (session) {
       for (const [pid, entry] of this.players) {
         if (entry.session === session && entry.bot) {
-          this.players.set(pid, { ...entry, connId, bot: false });
+          this.players.set(pid, { ...entry, connId, bot: false, ready: false });
           // Resume normal input processing for this vehicle.
           if (!this.inputs.has(pid)) this.inputs.set(pid, NEUTRAL_INPUT);
           this.lastHumanInputAt = this.raceTime;
@@ -204,17 +206,10 @@ export class RoomCore {
       bot: false,
       cls: safeCls,
       session,
+      ready: false,
     });
-    // Lobby auto-start: long timer when the first human shows up; shorten when a 2nd arrives.
-    const humans = [...this.players.values()].filter((p) => !p.bot).length;
-    if (humans === 1 && this.startsIn < 0) {
-      this.startsIn = this.lobbyAutoStartS;
-    } else if (humans >= 2) {
-      this.startsIn = Math.min(
-        this.startsIn < 0 ? this.lobbyAutoStartS : this.startsIn,
-        Math.min(12, this.lobbyAutoStartS),
-      );
-    }
+    // No auto-start by default — players use the Start now button or the
+    // per-player Ready flag to trigger the race when they're good to go.
     return {
       id,
       reconnected: false,
@@ -278,6 +273,7 @@ export class RoomCore {
         bot: true,
         cls,
         session: null,
+        ready: true,
       });
     }
     // Spawn vehicles.
@@ -511,7 +507,50 @@ export class RoomCore {
       color: p.color,
       bot: p.bot,
       cls: p.cls,
+      ready: p.ready,
     }));
+  }
+
+  /**
+   * Toggle a human player's lobby-ready flag. Returns whether all currently
+   * connected humans are now ready (caller decides whether to auto-start).
+   */
+  setReady(connId: string, ready: boolean): { allReady: boolean; humans: number } {
+    if (this.phase !== 'WAITING') return { allReady: false, humans: 0 };
+    for (const [pid, entry] of this.players) {
+      if (entry.connId === connId && !entry.bot) {
+        this.players.set(pid, { ...entry, ready });
+        break;
+      }
+    }
+    const humans = [...this.players.values()].filter((p) => !p.bot);
+    return {
+      allReady: humans.length > 0 && humans.every((p) => p.ready),
+      humans: humans.length,
+    };
+  }
+
+  /**
+   * Switch the active track in-place. Only allowed during WAITING — players
+   * keep their ids/sessions so reconnection still works. Returns true if the
+   * track was actually changed.
+   */
+  setTrack(trackId: string): boolean {
+    if (this.phase !== 'WAITING') return false;
+    if (trackId === this.track.id) return false;
+    try {
+      this.track = findTrack(trackId);
+    } catch {
+      return false;
+    }
+    this.config = buildRaceConfig(this.track, TOTAL_LAPS);
+    this.rebuildPickups();
+    // Switching track invalidates lobby readiness (different track → different
+    // commitment). Reset everyone to not-ready.
+    for (const [pid, entry] of this.players) {
+      if (entry.ready) this.players.set(pid, { ...entry, ready: false });
+    }
+    return true;
   }
 
   snapshotShips(): ShipSnapshot[] {

@@ -322,6 +322,8 @@ const applyServer = (
       return state;
     case 'pong':
       return { ...state, rttMs: now - msg.ts };
+    case 'track-changed':
+      return { ...state, trackId: msg.trackId };
   }
 };
 

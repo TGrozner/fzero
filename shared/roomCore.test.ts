@@ -13,14 +13,51 @@ describe('RoomCore lifecycle', () => {
     expect(r.players.size).toBe(1);
   });
 
-  it('startsIn is set when the first human joins, shortened on second', () => {
+  it('does not auto-start the lobby — players control when to begin', () => {
     const r = new RoomCore();
     r.addHuman('c1', 'A', '#3aa0ff');
-    const afterFirst = r.startsIn;
-    expect(afterFirst).toBeGreaterThan(0);
+    expect(r.startsIn).toBe(-1);
     r.addHuman('c2', 'B', '#ff4040');
-    expect(r.startsIn).toBeLessThanOrEqual(afterFirst);
-    expect(r.startsIn).toBeLessThanOrEqual(12);
+    expect(r.startsIn).toBe(-1);
+    expect(r.phase).toBe('WAITING');
+  });
+
+  it('setReady reports allReady once every human flips the flag', () => {
+    const r = new RoomCore();
+    r.addHuman('c1', 'A', '#3aa0ff');
+    r.addHuman('c2', 'B', '#ff4040');
+    expect(r.setReady('c1', true).allReady).toBe(false);
+    const result = r.setReady('c2', true);
+    expect(result.allReady).toBe(true);
+    expect(result.humans).toBe(2);
+  });
+
+  it('setReady is a no-op once the race has started', () => {
+    const r = new RoomCore();
+    r.addHuman('c1', 'A', '#3aa0ff');
+    r.startRace();
+    const result = r.setReady('c1', true);
+    expect(result.allReady).toBe(false);
+    expect(result.humans).toBe(0);
+  });
+
+  it('setTrack swaps the active track in WAITING and clears ready flags', () => {
+    const r = new RoomCore('mute-avenue');
+    r.addHuman('c1', 'A', '#3aa0ff');
+    r.setReady('c1', true);
+    expect(r.setTrack('big-blue')).toBe(true);
+    expect(r.track.id).toBe('big-blue');
+    const me = [...r.players.values()][0];
+    expect(me?.ready).toBe(false);
+  });
+
+  it('setTrack refuses unknown ids and rejects when not WAITING', () => {
+    const r = new RoomCore('mute-avenue');
+    r.addHuman('c1', 'A', '#3aa0ff');
+    expect(r.setTrack('does-not-exist')).toBe(false);
+    expect(r.track.id).toBe('mute-avenue');
+    r.startRace();
+    expect(r.setTrack('big-blue')).toBe(false);
   });
 
   it('removeHuman during WAITING removes the slot', () => {

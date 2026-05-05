@@ -1,15 +1,31 @@
 import { useEffect, useState } from 'react';
 import { TRACKS } from '../../shared/track.ts';
+import type { ShipClass } from '../../shared/constants.ts';
 
-type Player = { id: string; name: string; color: string; bot: boolean };
+type Player = {
+  id: string;
+  name: string;
+  color: string;
+  bot: boolean;
+  cls: ShipClass;
+  ready: boolean;
+};
 
 type Props = {
   trackId: string;
   players: Player[];
-  startsIn: number;
+  myId: string | null;
   roomName: string;
   onCancel: () => void;
   onStartNow: () => void;
+  onSetReady: (ready: boolean) => void;
+  onSetTrack: (trackId: string) => void;
+};
+
+const CLS_LABEL: Record<ShipClass, string> = {
+  speed: 'SPD',
+  tank: 'TNK',
+  balanced: 'BAL',
 };
 
 /**
@@ -23,18 +39,25 @@ const buildInviteUrl = (room: string): string => {
   const r = room || `room-${Date.now().toString(36)}`;
   const url = new URL(window.location.href);
   url.searchParams.set('room', r);
-  // Strip any client-only flags that would propagate awkwardly to a guest.
   url.searchParams.delete('profile');
   return url.toString();
 };
 
-export function Lobby({ trackId, players, startsIn, roomName, onCancel, onStartNow }: Props) {
-  const track = TRACKS.find((t) => t.id === trackId);
-  const startsInDisplay = startsIn >= 0 ? Math.ceil(startsIn) : null;
+export function Lobby({
+  trackId,
+  players,
+  myId,
+  roomName,
+  onCancel,
+  onStartNow,
+  onSetReady,
+  onSetTrack,
+}: Props) {
   const humans = players.filter((p) => !p.bot);
+  const me = myId ? humans.find((p) => p.id === myId) ?? null : null;
+  const allReady = humans.length > 0 && humans.every((p) => p.ready);
   const [copied, setCopied] = useState(false);
 
-  // Reset the "Copied!" badge after 1.5s.
   useEffect(() => {
     if (!copied) return;
     const t = window.setTimeout(() => setCopied(false), 1500);
@@ -48,8 +71,6 @@ export function Lobby({ trackId, players, startsIn, roomName, onCancel, onStartN
       await navigator.clipboard.writeText(url);
       setCopied(true);
     } catch {
-      // Clipboard API can fail (insecure context, denied permission, etc).
-      // Fall back to a textarea-based copy + selection.
       try {
         const ta = document.createElement('textarea');
         ta.value = url;
@@ -61,7 +82,7 @@ export function Lobby({ trackId, players, startsIn, roomName, onCancel, onStartN
         document.body.removeChild(ta);
         setCopied(true);
       } catch {
-        // give up silently — UI keeps the button enabled
+        // give up silently
       }
     }
   };
@@ -69,19 +90,53 @@ export function Lobby({ trackId, players, startsIn, roomName, onCancel, onStartN
   return (
     <div className="menu lobby-screen" data-testid="lobby">
       <h1>Lobby</h1>
-      <div className="lobby-info">
-        Track: <strong>{track?.name ?? trackId}</strong>
+
+      <label className="lobby-info" style={{ display: 'flex', gap: 8, alignItems: 'center', justifyContent: 'center' }}>
+        Track:
+        <select
+          data-testid="track-select"
+          value={trackId}
+          onChange={(e) => onSetTrack(e.target.value)}
+          style={{ minWidth: 160 }}
+        >
+          {TRACKS.map((t) => (
+            <option key={t.id} value={t.id}>
+              {t.name}
+            </option>
+          ))}
+        </select>
+      </label>
+
+      <div className="pulse">
+        {humans.length} pilot{humans.length === 1 ? '' : 's'}
+        {humans.length > 0 && ` · ${humans.filter((p) => p.ready).length}/${humans.length} ready`}
       </div>
-      <div className="pulse">{humans.length} pilot{humans.length === 1 ? '' : 's'}</div>
-      <div className="lobby-info">
-        {startsInDisplay !== null
-          ? `Starts in ${startsInDisplay}s · bots fill remaining slots`
-          : 'Waiting for at least one more pilot…'}
+      <div className="lobby-info" style={{ minHeight: '1.2em' }}>
+        {humans.length === 0
+          ? 'Waiting for the first pilot…'
+          : allReady
+            ? 'Everyone ready — starting…'
+            : 'Click Ready when you’re set, or hit Start now to bypass.'}
       </div>
-      <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'grid', gap: 4 }}>
-        {humans.slice(0, 12).map((p) => (
-          <li key={p.id} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+
+      <ul
+        data-testid="player-list"
+        style={{ listStyle: 'none', padding: 0, margin: 0, display: 'grid', gap: 6, maxHeight: 240, overflowY: 'auto' }}
+      >
+        {humans.map((p) => (
+          <li
+            key={p.id}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 8,
+              padding: '4px 6px',
+              background: p.id === myId ? 'rgba(58, 160, 255, 0.08)' : 'transparent',
+              borderRadius: 4,
+            }}
+          >
             <span
+              aria-hidden
               style={{
                 width: 12,
                 height: 12,
@@ -89,26 +144,50 @@ export function Lobby({ trackId, players, startsIn, roomName, onCancel, onStartN
                 background: p.color,
                 display: 'inline-block',
                 boxShadow: `0 0 6px ${p.color}`,
+                flexShrink: 0,
               }}
             />
-            <span>{p.name}</span>
+            <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>
+              {p.name}
+              {p.id === myId && <span style={{ opacity: 0.6 }}> (you)</span>}
+            </span>
+            <span
+              aria-label={`class: ${p.cls}`}
+              style={{
+                fontSize: 11,
+                opacity: 0.7,
+                padding: '2px 6px',
+                border: '1px solid currentColor',
+                borderRadius: 3,
+                letterSpacing: 1,
+              }}
+            >
+              {CLS_LABEL[p.cls]}
+            </span>
+            <span
+              aria-label={p.ready ? 'ready' : 'not ready'}
+              style={{ width: 18, textAlign: 'center', color: p.ready ? '#3eff8b' : '#666' }}
+            >
+              {p.ready ? '✓' : '·'}
+            </span>
           </li>
         ))}
       </ul>
-      <div style={{ display: 'flex', gap: 10, justifyContent: 'center', flexWrap: 'wrap' }}>
-        <button
-          onClick={onStartNow}
-          data-testid="start-now"
-          style={{ minWidth: 140 }}
-          disabled={startsInDisplay !== null && startsInDisplay <= 1}
-        >
+
+      <div style={{ display: 'flex', gap: 10, justifyContent: 'center', flexWrap: 'wrap', marginTop: 6 }}>
+        {me && (
+          <button
+            onClick={() => onSetReady(!me.ready)}
+            data-testid="ready-toggle"
+            style={{ minWidth: 130, background: me.ready ? '#1a4a2a' : undefined }}
+          >
+            {me.ready ? '✓ Ready' : 'Ready'}
+          </button>
+        )}
+        <button onClick={onStartNow} data-testid="start-now" style={{ minWidth: 110 }}>
           Start now
         </button>
-        <button
-          onClick={onCopyInvite}
-          data-testid="copy-invite"
-          style={{ minWidth: 160 }}
-        >
+        <button onClick={onCopyInvite} data-testid="copy-invite" style={{ minWidth: 140 }}>
           {copied ? 'Copied!' : 'Copy invite link'}
         </button>
         <button onClick={onCancel}>Cancel</button>
