@@ -1,5 +1,6 @@
 import {
   useReducer,
+  useRef,
   useState,
   useCallback,
   useEffect,
@@ -12,6 +13,12 @@ import { Lobby } from './components/Lobby.tsx';
 import { Results } from './components/Results.tsx';
 import { useGameSocket } from './hooks/useGameSocket.ts';
 import { getMixer } from './audio/mixer.ts';
+import {
+  applyRaceOutcome,
+  loadCareerStats,
+  saveCareerStats,
+  type CareerStats,
+} from './storage/careerStats.ts';
 import {
   DEFAULT_SHIP_CLASS,
   SHIP_CLASSES,
@@ -89,6 +96,8 @@ export function App() {
     music: profile.music,
   }));
   const [connectRequested, setConnectRequested] = useState(false);
+  const [careerStats, setCareerStats] = useState<CareerStats>(loadCareerStats);
+  const lastRecordedResultsRef = useRef<readonly unknown[] | null>(null);
 
   // Push audio settings to the singleton mixer whenever they change.
   useEffect(() => {
@@ -230,6 +239,27 @@ export function App() {
     if (state.rttMs === null || state.status !== 'connected') return;
     socket.send({ type: 'set_rtt', rtt: state.rttMs });
   }, [state.rttMs, state.status, socket]);
+
+  // Career-stats accumulation. Fires once per race when results land — guard
+  // by reference equality on the standings array so a re-render or a re-entry
+  // of the results screen doesn't double-count.
+  useEffect(() => {
+    if (state.view !== 'results' || state.standings.length === 0) return;
+    if (lastRecordedResultsRef.current === state.standings) return;
+    lastRecordedResultsRef.current = state.standings;
+    const me = state.myId
+      ? state.standings.find((s) => s.id === state.myId) ?? null
+      : null;
+    if (!me) return;
+    const next = applyRaceOutcome(careerStats, {
+      position: me.ko ? null : me.position,
+      ko: me.ko,
+      kosScored: state.myKosThisRace,
+      totalRacers: state.standings.length,
+    });
+    setCareerStats(next);
+    saveCareerStats(next);
+  }, [state.view, state.standings, state.myId, state.myKosThisRace, careerStats]);
 
   return (
     <div className="app">

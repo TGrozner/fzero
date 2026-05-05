@@ -3,6 +3,7 @@ import type { Action } from '../state.ts';
 import { SHIP_CLASSES, SHIP_COLORS, type ShipClass } from '../../shared/constants.ts';
 import { TRACKS } from '../../shared/track.ts';
 import { type BestTimesStore, formatTimeMs, loadBestTimes } from '../storage/bestTimes.ts';
+import { loadCareerStats } from '../storage/careerStats.ts';
 import { MenuBackdrop } from './MenuBackdrop.tsx';
 
 type Props = {
@@ -49,6 +50,9 @@ export function Menu({
   // whatever the Race component most-recently saved.
   const bestTimes: BestTimesStore = loadBestTimes();
   const pb = bestTimes[trackId];
+  const career = loadCareerStats();
+  const winRate =
+    career.races > 0 ? Math.round((career.wins / career.races) * 100) : 0;
   return (
     <>
       <MenuBackdrop color={color} cls={cls} />
@@ -152,6 +156,19 @@ export function Menu({
           )}
         </div>
       </div>
+      {career.races > 0 && (
+        <div
+          className="track-pb"
+          data-testid="career-stats"
+          style={{ display: 'flex', flexWrap: 'wrap', gap: 14, justifyContent: 'center', fontSize: 13 }}
+        >
+          <span><span style={{ color: 'var(--muted)' }}>Career </span><strong>{career.races}</strong>{career.races === 1 ? ' race' : ' races'}</span>
+          <span><span style={{ color: 'var(--muted)' }}>· </span><strong style={{ color: 'var(--ko)' }}>{career.wins}</strong> wins ({winRate}%)</span>
+          <span><span style={{ color: 'var(--muted)' }}>· </span><strong style={{ color: 'var(--accent-2)' }}>{career.podiums}</strong> podiums</span>
+          <span><span style={{ color: 'var(--muted)' }}>· </span><strong>{career.kos}</strong> KOs</span>
+          <span><span style={{ color: 'var(--muted)' }}>· </span><strong>{career.deaths}</strong> deaths</span>
+        </div>
+      )}
       <div className="row" style={{ flexDirection: 'column', alignItems: 'stretch', gap: 4 }}>
         <label htmlFor="room">Room (optional)</label>
         <input

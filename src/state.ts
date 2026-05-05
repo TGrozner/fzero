@@ -83,6 +83,9 @@ export type ClientState = {
   error: string | null;
   /** KOs the local player has scored — retained briefly so the HUD can show them. */
   myKos: readonly { id: string; at: number }[];
+  /** Cumulative count of KOs the local player has scored in the current race.
+   *  Reset to 0 on each COUNTDOWN; consumed by career-stats persistence. */
+  myKosThisRace: number;
   /** Recent pickup events — retained briefly so the renderer can spawn FX. */
   pickupEvents: readonly PickupEvent[];
   /** Last N KOs in chronological order — surfaced on the results screen. */
@@ -121,6 +124,7 @@ export const buildInitialClientState = (): ClientState => ({
   rttMs: null,
   error: null,
   myKos: [],
+  myKosThisRace: 0,
   pickupEvents: [],
   koLog: [],
   hitEvents: [],
@@ -227,6 +231,8 @@ const applyServer = (
       };
       if (msg.phase === 'COUNTDOWN' || msg.phase === 'RACING') next.view = 'race';
       if (msg.phase === 'FINISHED') next.view = 'results';
+      // Reset the per-race KO counter when a new race kicks off.
+      if (msg.phase === 'COUNTDOWN') next.myKosThisRace = 0;
       return next;
     }
     case 'snapshot': {
@@ -306,6 +312,7 @@ const applyServer = (
       const next: ClientState = { ...state, koLog, deathCam };
       if (msg.by === state.myId) {
         next.myKos = [...fresh, { id: msg.id, at: now }];
+        next.myKosThisRace = state.myKosThisRace + 1;
       } else if (fresh.length !== state.myKos.length) {
         next.myKos = fresh;
       }
