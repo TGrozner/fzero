@@ -52,6 +52,7 @@ export const _vehicleFromSnapshot = (
   freeBoostUntil: (s.f & FLAG_FREE_BOOST) !== 0 ? raceTime + 1.0 : 0,
   spinCd: s.sc,
   sideCd: s.dc,
+  lastSegIdx: 0,
 });
 
 /**

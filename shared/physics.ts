@@ -53,6 +53,8 @@ export type Vehicle = {
   readonly spinCd: number;
   /** Cooldown remaining (seconds) for side attack. */
   readonly sideCd: number;
+  /** Hint for closestOnTrack: last known segment index. */
+  readonly lastSegIdx: number;
 };
 
 export type VehicleInput = {
@@ -152,6 +154,7 @@ export const createVehicle = (
   freeBoostUntil: 0,
   spinCd: 0,
   sideCd: 0,
+  lastSegIdx: 0,
 });
 
 const decelerate = (v: Vehicle, dt: number, params: PhysicsParams): Vehicle => {
@@ -209,7 +212,7 @@ export const stepVehicle = (
   vel = sub(vel, scale(right, lateralVel * gripFactor));
 
   // Drag (off-track much higher).
-  const onTrackInfo = closestOnTrack(track, v.pos);
+  const onTrackInfo = closestOnTrack(track, v.pos, v.lastSegIdx);
   const onTrack = onTrackInfo.distance <= track.halfWidth;
   const dragK = onTrack || skywayActive ? params.drag : params.drag * params.offTrackDrag;
   vel = scale(vel, Math.max(0, 1 - dragK * dt));
@@ -233,7 +236,7 @@ export const stepVehicle = (
   // Wall collision (skyway is immune).
   let wallDamage = 0;
   if (!skywayActive) {
-    const after = closestOnTrack(track, pos);
+    const after = closestOnTrack(track, pos, onTrackInfo.segIdx);
     if (after.distance > track.halfWidth) {
       const overshoot = after.distance - track.halfWidth;
       const dx = after.projected.x - pos.x;
@@ -284,6 +287,7 @@ export const stepVehicle = (
     koTime: ko && v.koTime === null ? raceTime : v.koTime,
     spinCd,
     sideCd,
+    lastSegIdx: onTrackInfo.segIdx,
   };
 };
 

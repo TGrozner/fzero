@@ -3,9 +3,11 @@ import {
   KO_METER_PER_KO,
   SIDE_ATTACK_COOLDOWN_S,
   SIDE_ATTACK_DAMAGE,
+  SIDE_ATTACK_KNOCKBACK,
   SIDE_ATTACK_RANGE,
   SPIN_ATTACK_COOLDOWN_S,
   SPIN_ATTACK_DAMAGE,
+  SPIN_ATTACK_IMPULSE,
   SPIN_ATTACK_RADIUS,
 } from './constants.ts';
 import { clamp } from './vec2.ts';
@@ -61,7 +63,7 @@ export const applySpinAttack = (
     const dist = Math.sqrt(distSq) || 1;
     const nx = dx / dist;
     const ny = dy / dist;
-    const impulse = 90;
+    const impulse = SPIN_ATTACK_IMPULSE;
     return {
       ...v,
       power: newPower,
@@ -128,7 +130,7 @@ export const applySideAttack = (
       kind: dir === -1 ? 'side-left' : 'side-right',
     });
     // Lateral knockback away in the attack direction.
-    const impulse = 220;
+    const impulse = SIDE_ATTACK_KNOCKBACK;
     return {
       ...v,
       power: newPower,

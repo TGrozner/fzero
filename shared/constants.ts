@@ -53,6 +53,11 @@ export const SIDE_ATTACK_IMPULSE = 280;
 export const SIDE_ATTACK_DAMAGE = 0.12;
 export const SIDE_ATTACK_COOLDOWN_S = 1.0;
 
+/** Outward impulse applied to victims of a spin attack (world units/s). */
+export const SPIN_ATTACK_IMPULSE = 90;
+/** Lateral knockback applied to victims of a side attack (world units/s). */
+export const SIDE_ATTACK_KNOCKBACK = 220;
+
 /** Damage from a wall hit, applied as `-vn * factor` where vn is the inbound
  *  normal velocity. 0.0015 means a top-speed (~280) head-on slam takes ~42 %
  *  of HP — punishing but survivable, as opposed to the old 0.0025 which

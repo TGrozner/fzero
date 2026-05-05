@@ -91,16 +91,21 @@ export type ClosestSegment = {
   arcLength: number;
 };
 
-export const closestOnTrack = (track: Track, p: Vec2): ClosestSegment => {
-  let bestIdx = 0;
-  let bestT = 0;
-  let bestDistSq = Infinity;
-  let bestProj: Vec2 = track.centerline[0] as Vec2;
-  let bestSigned = 0;
+/**
+ * Find the closest point on the track centerline to `p`.
+ *
+ * `hintIdx` (optional) biases the search to start from a known-good segment
+ * and checks a local neighbourhood first. When vehicles call this every
+ * frame, passing `lastResult.segIdx` as the hint turns the common case into
+ * ~5 segment checks instead of N — a significant win on 48–72 segment tracks
+ * with 99 vehicles.
+ */
+export const closestOnTrack = (track: Track, p: Vec2, hintIdx?: number): ClosestSegment => {
+  const N = track.centerline.length;
 
-  for (let i = 0; i < track.centerline.length; i++) {
+  const check = (i: number, bestDistSq: number, bestIdx: number, bestT: number, bestProj: Vec2, bestSigned: number) => {
     const a = track.centerline[i] as Vec2;
-    const b = track.centerline[(i + 1) % track.centerline.length] as Vec2;
+    const b = track.centerline[(i + 1) % N] as Vec2;
     const ab = sub(b, a);
     const ap = sub(p, a);
     const lenSq = lengthSq(ab);
@@ -109,12 +114,38 @@ export const closestOnTrack = (track: Track, p: Vec2): ClosestSegment => {
     const diff = sub(p, proj);
     const dSq = lengthSq(diff);
     if (dSq < bestDistSq) {
-      bestDistSq = dSq;
-      bestIdx = i;
-      bestT = t;
-      bestProj = proj;
-      bestSigned = cross(ab, ap) >= 0 ? Math.sqrt(dSq) : -Math.sqrt(dSq);
+      return { bestDistSq: dSq, bestIdx: i, bestT: t, bestProj: proj, bestSigned: cross(ab, ap) >= 0 ? Math.sqrt(dSq) : -Math.sqrt(dSq) };
     }
+    return { bestDistSq, bestIdx, bestT, bestProj, bestSigned };
+  };
+
+  let bestIdx = 0;
+  let bestT = 0;
+  let bestDistSq = Infinity;
+  let bestProj: Vec2 = track.centerline[0] as Vec2;
+  let bestSigned = 0;
+
+  // If we have a hint, check a local window first (±3 segments).
+  if (hintIdx !== undefined && hintIdx >= 0 && hintIdx < N) {
+    const WINDOW = 3;
+    for (let d = -WINDOW; d <= WINDOW; d++) {
+      const i = ((hintIdx + d) % N + N) % N;
+      const r = check(i, bestDistSq, bestIdx, bestT, bestProj, bestSigned);
+      bestDistSq = r.bestDistSq; bestIdx = r.bestIdx; bestT = r.bestT; bestProj = r.bestProj; bestSigned = r.bestSigned;
+    }
+    // If the best is within track width, skip the full scan — the vehicle
+    // hasn't teleported and we've found the right neighbourhood.
+    if (bestDistSq <= track.halfWidth * track.halfWidth * 4) {
+      const segLen = (track.cumulative[bestIdx + 1] as number) - (track.cumulative[bestIdx] as number);
+      const arcLength = (track.cumulative[bestIdx] as number) + bestT * segLen;
+      return { segIdx: bestIdx, t: bestT, projected: bestProj, distance: Math.sqrt(bestDistSq), signedDistance: bestSigned, arcLength };
+    }
+  }
+
+  // Full scan fallback.
+  for (let i = 0; i < N; i++) {
+    const r = check(i, bestDistSq, bestIdx, bestT, bestProj, bestSigned);
+    bestDistSq = r.bestDistSq; bestIdx = r.bestIdx; bestT = r.bestT; bestProj = r.bestProj; bestSigned = r.bestSigned;
   }
   const segLen =
     (track.cumulative[bestIdx + 1] as number) - (track.cumulative[bestIdx] as number);

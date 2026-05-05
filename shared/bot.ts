@@ -19,6 +19,7 @@ import { closestOnTrack, lookaheadPoint, type Track } from './track.ts';
 import { type Vehicle, type VehicleInput, NEUTRAL_INPUT } from './physics.ts';
 import { hashString, createRng } from './rng.ts';
 import type { PickupKind } from './pickups.ts';
+import { SPIN_ATTACK_RADIUS } from './constants.ts';
 
 export type ActivePickup = {
   readonly kind: PickupKind;
@@ -139,16 +140,21 @@ export const botInput = (
   // Spin attack when there is an enemy very close in front.
   // Per-frame trigger rate is scaled down so even fully-aggressive bots only
   // fire ~1-2 times per second, instead of 27 times like the raw probability.
+  // Deterministic per-frame RNG for this bot (seeded from id + raceTime so
+  // replays are reproducible and we avoid Math.random()).
+  const frameSeed = hashString(bot.id) ^ Math.round(raceTime * 100);
+  const rng = createRng(frameSeed);
+
   let spin = false;
   if (bot.spinCd <= 0) {
     for (const o of others) {
       if (o.id === bot.id || o.ko || o.skywayUntil > raceTime) continue;
       const rel = sub(o.pos, bot.pos);
       const dist = length(rel);
-      if (dist > 12) continue;
+      if (dist > SPIN_ATTACK_RADIUS) continue;
       const forwardDot = dot(rel, fwd);
       if (forwardDot < 0) continue;
-      if (Math.random() < profile.aggression * 0.04) {
+      if (rng.next() < profile.aggression * 0.04) {
         spin = true;
         break;
       }
@@ -175,7 +181,7 @@ export const botInput = (
         closingSpeed > 30 &&
         profile.aggression > 0.25;
       const opportunistic =
-        profile.aggression > 0.4 && Math.random() < profile.aggression * 0.03;
+        profile.aggression > 0.4 && rng.next() < profile.aggression * 0.03;
       if (defensive || opportunistic) {
         if (lat > 0) sideRight = true;
         else sideLeft = true;
@@ -206,7 +212,7 @@ export const botInput = (
     // Cautious bots will NOT pop skyway just because the meter's full —
     // they wait for a real threat. Risk-takers occasionally fire it on
     // curves (weak random, scaled down hard).
-    else if (profile.riskTaking > 0.7 && Math.random() < 0.005) skyway = true;
+    else if (profile.riskTaking > 0.7 && rng.next() < 0.005) skyway = true;
   }
 
   return {

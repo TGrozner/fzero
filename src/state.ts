@@ -241,6 +241,7 @@ const applyServer = (
       return next;
     }
     case 'snapshot': {
+      if (!Array.isArray(msg.ships)) return state;
       const snap: Snapshot = {
         tick: msg.tick,
         time: msg.time,
