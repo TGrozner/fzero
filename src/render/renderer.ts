@@ -1221,10 +1221,11 @@ const drawSpeedFx = (
 };
 
 /**
- * Pickup pads: draw all pads of the same kind in one stylesheet pass to
- * minimise state changes. No shadowBlur — at ~14 pads/track that was 14
- * per-frame gaussian blurs which is wasteful when most pads are off-screen
- * or behind the camera.
+ * Pickup pads: draw all pads of the same kind in batched passes to
+ * minimise state changes. Three layered concentric discs + a vertical
+ * "lighthouse beam" make pads readable from a distance without the
+ * shadowBlur cost (which was per-pad and ate ~1 ms a frame on 99-grid
+ * tracks).
  */
 const drawPickups = (
   rc: RenderContext,
@@ -1236,7 +1237,8 @@ const drawPickups = (
 ): void => {
   const { ctx, width } = rc;
   const cache = getPickupCache(track);
-  const pulse = 0.85 + 0.15 * Math.sin(nowMs * 0.006);
+  const pulse = 0.8 + 0.2 * Math.sin(nowMs * 0.006);
+  const beamPulse = 0.55 + 0.45 * Math.sin(nowMs * 0.008);
 
   // First pass: project visible pads once.
   type Drawn = { sx: number; sy: number; r: number; fa: number; kind: 'boost' | 'heal' | 'mine' };
@@ -1249,18 +1251,50 @@ const drawPickups = (
     if (!proj.visible) continue;
     const fa = fogAlpha(proj.depth);
     if (fa <= 0.04) continue;
-    const r = Math.max(2.5, (cfg.focal * 6) / proj.depth) * pulse;
+    // Visual radius lines up with the world hitbox (PICKUP_RADIUS = 13) so
+    // what you SEE is what you HIT.
+    const r = Math.max(5, (cfg.focal * 11) / proj.depth) * pulse;
     drawn.push({ sx: proj.sx, sy: proj.sy, r, fa, kind: spec.kind });
   }
   if (drawn.length === 0) return;
 
-  // Second pass: bucket by kind and stroke each bucket as a single path.
+  // Lighthouse beams — a tall thin pillar of color anchored on each pad,
+  // visible from far away so you can SPOT the pad before you're on top
+  // of it. Drawn first so the disc sits on top.
   const colors = { boost: '#ffd23a', heal: '#3eff8b', mine: '#ff4040' } as const;
   for (const kind of ['boost', 'heal', 'mine'] as const) {
     const sub = drawn.filter((d) => d.kind === kind);
     if (sub.length === 0) continue;
     ctx.fillStyle = colors[kind];
-    ctx.globalAlpha = 0.85;
+    ctx.globalAlpha = 0.18 * beamPulse;
+    for (const d of sub) {
+      const beamW = Math.max(2, d.r * 0.45);
+      const beamH = Math.max(20, d.r * 7);
+      ctx.fillRect(d.sx - beamW / 2, d.sy - beamH, beamW, beamH);
+    }
+  }
+
+  // Outer halo — soft glow ~1.8x the disc, low alpha. Adds depth without
+  // shadowBlur.
+  for (const kind of ['boost', 'heal', 'mine'] as const) {
+    const sub = drawn.filter((d) => d.kind === kind);
+    if (sub.length === 0) continue;
+    ctx.fillStyle = colors[kind];
+    ctx.globalAlpha = 0.18;
+    ctx.beginPath();
+    for (const d of sub) {
+      ctx.moveTo(d.sx + d.r * 1.8, d.sy);
+      ctx.arc(d.sx, d.sy, d.r * 1.8, 0, Math.PI * 2);
+    }
+    ctx.fill();
+  }
+
+  // Main disc.
+  for (const kind of ['boost', 'heal', 'mine'] as const) {
+    const sub = drawn.filter((d) => d.kind === kind);
+    if (sub.length === 0) continue;
+    ctx.fillStyle = colors[kind];
+    ctx.globalAlpha = 0.95;
     ctx.beginPath();
     for (const d of sub) {
       ctx.moveTo(d.sx + d.r, d.sy);
@@ -1268,25 +1302,39 @@ const drawPickups = (
     }
     ctx.fill();
   }
-  // Glyphs in a single pass.
+
+  // Inner highlight ring — bright white-ish, sits inside the disc to give
+  // each pad a "lit core" that catches the eye even at speed.
+  ctx.globalAlpha = 0.55;
+  ctx.fillStyle = '#ffffff';
+  ctx.beginPath();
+  for (const d of drawn) {
+    const ir = d.r * 0.45;
+    ctx.moveTo(d.sx + ir, d.sy);
+    ctx.arc(d.sx, d.sy, ir, 0, Math.PI * 2);
+  }
+  ctx.fill();
+
+  // Glyph on top, one font-set per size bucket to avoid per-pad ctx.font
+  // assignment cost.
   const glyphFor: Record<'boost' | 'heal' | 'mine', string> = {
-    boost: '>',
+    boost: '➤',
     heal: '+',
-    mine: 'x',
+    mine: '⚠',
   };
-  ctx.fillStyle = 'rgba(10, 5, 36, 0.9)';
+  ctx.fillStyle = 'rgba(10, 5, 36, 0.92)';
+  ctx.globalAlpha = 1;
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   let lastFont = '';
   for (const d of drawn) {
-    const font = `${Math.max(8, Math.round(d.r * 1.3))}px ui-sans-serif, system-ui`;
+    const font = `bold ${Math.max(10, Math.round(d.r * 1.3))}px ui-sans-serif, system-ui`;
     if (font !== lastFont) {
       ctx.font = font;
       lastFont = font;
     }
     ctx.fillText(glyphFor[d.kind], d.sx, d.sy + 1);
   }
-  ctx.globalAlpha = 1;
 };
 
 /**

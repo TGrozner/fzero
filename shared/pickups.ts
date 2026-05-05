@@ -12,7 +12,10 @@ export type PickupSpec = {
   readonly lateral: number;
 };
 
-export const PICKUP_RADIUS = 7;
+/** World-units pickup hitbox radius. ~13 lines up with the renderer's
+ *  visible disc + halo so what you SEE is what you HIT — players were
+ *  clipping past pads they thought they'd grabbed at 7. */
+export const PICKUP_RADIUS = 13;
 export const PICKUP_RESPAWN_S = 5;
 
 export const BOOST_PICKUP_POWER = 0.18;

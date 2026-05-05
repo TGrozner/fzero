@@ -60,10 +60,14 @@ export function Race({ state, dispatch, socket, onLeave }: Props) {
   const input = useKeyboard(true, handlePress);
   const keys = input.ref;
 
-  // Keydown predictor for spin/side attacks.
+  // Predictor for spin/side attacks. Watches both keydown events (kbd) and
+  // rising edges on the unified input ref (touch). Without the latter, taps
+  // on the SPIN / Q / E buttons fire the action server-side but produce no
+  // local visual / audio feedback, which makes the buttons feel broken.
   const { spinFlash, sideRing, hitMarkers, hitPops } = useHitPrediction(
     state,
     renderRef,
+    input,
   );
 
   // Audio + flying overlays driven by server events.

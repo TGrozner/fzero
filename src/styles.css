@@ -728,50 +728,46 @@ canvas {
   text-align: right;
 }
 
-/* Mobile / touch overlay. Buttons sized for thumbs (≥ 72 px) and offset
-   away from the iPhone notch + home indicator via safe-area insets. */
+/* Mobile / touch overlay. Buttons sized for thumbs (≥ 72 px), offset away
+   from the iPhone notch + home indicator via safe-area insets. Throttle is
+   auto-engaged so the user just steers. */
 .touch-controls {
   position: absolute;
   inset: 0;
   z-index: 11;
   pointer-events: none;
 }
-.touch-pad {
+
+/* Bottom-left steering cluster: brake (small, secondary) above the steer
+   button pair (big, primary thumb-zone). */
+.touch-steer {
   position: absolute;
-  /* Cover the whole left half + a generous bottom margin: comfortable
-     thumb reach in landscape, doesn't fight the action buttons. */
-  bottom: 0;
-  left: 0;
-  width: 50%;
-  height: 70%;
+  bottom: max(20px, env(safe-area-inset-bottom));
+  left: max(20px, env(safe-area-inset-left));
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  align-items: flex-start;
   pointer-events: auto;
-  touch-action: none;
 }
-/* Visible "floating" joystick — only rendered while a gesture is active. */
-.touch-joystick-base {
-  position: fixed;
-  border-radius: 50%;
-  background: rgba(58, 160, 255, 0.06);
-  border: 2px solid rgba(58, 160, 255, 0.4);
-  box-shadow: 0 0 16px rgba(58, 160, 255, 0.25);
-  pointer-events: none;
-  z-index: 12;
+.touch-steer-row {
+  display: flex;
+  gap: 14px;
 }
-.touch-joystick-knob {
-  position: fixed;
-  width: 44px;
-  height: 44px;
-  border-radius: 50%;
-  background: rgba(58, 160, 255, 0.85);
-  box-shadow: 0 0 14px rgba(58, 160, 255, 0.7);
-  border: 2px solid rgba(255, 255, 255, 0.85);
-  pointer-events: none;
-  z-index: 13;
-  transition: background 80ms ease;
+.touch-btn-steer {
+  /* The big primary buttons. Slightly bigger than action buttons because
+     they're the dominant input on a touchscreen racer. */
+  width: 78px;
+  height: 78px;
+  font-size: 22px;
 }
-.touch-joystick-knob[data-active='true'] {
-  background: rgba(255, 58, 209, 0.85);
-  box-shadow: 0 0 18px rgba(255, 58, 209, 0.7);
+.touch-btn-brake {
+  /* Smaller secondary button — for tight corners, not the main loop. */
+  width: 60px;
+  height: 60px;
+  font-size: 11px;
+  border-color: rgba(255, 255, 255, 0.55);
+  box-shadow: 0 0 10px rgba(255, 255, 255, 0.2);
 }
 
 .touch-buttons {

@@ -22,13 +22,13 @@ const startRace = async (page: import('@playwright/test').Page, room?: string) =
   await expect(page.getByTestId('race-screen')).toBeVisible({ timeout: 30_000 });
 };
 
-test('on a touch device, the touch controls render after the race starts', async ({ page }) => {
+test('mobile control overlay renders all expected buttons during racing', async ({ page }) => {
   await startRace(page, `mobile-${Date.now().toString(36)}`);
-  // Wait for COUNTDOWN → RACING (touch controls are gated to RACING).
   await expect(page.getByTestId('touch-controls')).toBeVisible({ timeout: 15_000 });
-  // Joystick area + every action button + UI buttons must be present.
   for (const tid of [
-    'touch-pad',
+    'touch-left',
+    'touch-right',
+    'touch-brake',
     'touch-spin',
     'touch-q',
     'touch-e',
@@ -41,27 +41,6 @@ test('on a touch device, the touch controls render after the race starts', async
   }
 });
 
-test('the visible joystick base + knob appear on touch and hide on release', async ({ page }) => {
-  await startRace(page, `mobile-jstk-${Date.now().toString(36)}`);
-  await expect(page.getByTestId('touch-pad')).toBeVisible({ timeout: 15_000 });
-
-  // No joystick visible at rest.
-  await expect(page.getByTestId('touch-joystick-base')).toHaveCount(0);
-
-  const pad = page.getByTestId('touch-pad');
-  const box = await pad.boundingBox();
-  if (!box) throw new Error('touch-pad has no bounding box');
-  const cx = box.x + box.width / 2;
-  const cy = box.y + box.height / 2;
-
-  // Tap-and-hold: touchscreen API supports a single tap; for a sustained
-  // press we use page.dispatchEvent to fire pointer events directly.
-  await page.touchscreen.tap(cx, cy);
-  // Tap fires pointerdown + pointerup in quick succession; the joystick
-  // briefly appears then hides. Verify it's hidden immediately after.
-  await expect(page.getByTestId('touch-joystick-base')).toHaveCount(0);
-});
-
 test('tap pause shows the pause overlay; tap leave on the overlay returns to menu', async ({ page }) => {
   await startRace(page, `mobile-pause-${Date.now().toString(36)}`);
   await expect(page.getByTestId('touch-pause')).toBeVisible({ timeout: 15_000 });
@@ -69,7 +48,6 @@ test('tap pause shows the pause overlay; tap leave on the overlay returns to men
   await page.getByTestId('touch-pause').tap();
   await expect(page.getByTestId('pause')).toBeVisible();
 
-  // The pause overlay's existing leave button takes the user back to the menu.
   await page.getByTestId('pause-leave').tap();
   await expect(page.getByTestId('menu')).toBeVisible();
 });
@@ -81,13 +59,21 @@ test('the touch leave button on the race HUD ends the race', async ({ page }) =>
   await expect(page.getByTestId('menu')).toBeVisible();
 });
 
-test('action buttons exist as 72 px tap targets (thumb-friendly)', async ({ page }) => {
+test('steer buttons are at least 64 px (thumb-friendly) and action buttons too', async ({ page }) => {
   await startRace(page, `mobile-size-${Date.now().toString(36)}`);
   await expect(page.getByTestId('touch-boost')).toBeVisible({ timeout: 15_000 });
+  // Steer buttons are the dominant input and a touch larger.
+  for (const tid of ['touch-left', 'touch-right']) {
+    const box = await page.getByTestId(tid).boundingBox();
+    expect(box, `${tid} bounding box`).toBeTruthy();
+    expect(box!.width).toBeGreaterThanOrEqual(72);
+    expect(box!.height).toBeGreaterThanOrEqual(72);
+  }
+  // Action buttons.
   for (const tid of ['touch-spin', 'touch-q', 'touch-e', 'touch-boost']) {
     const box = await page.getByTestId(tid).boundingBox();
     expect(box, `${tid} bounding box`).toBeTruthy();
-    expect(box!.width).toBeGreaterThanOrEqual(64); // 72 px target with light tolerance
+    expect(box!.width).toBeGreaterThanOrEqual(64);
     expect(box!.height).toBeGreaterThanOrEqual(64);
   }
 });
