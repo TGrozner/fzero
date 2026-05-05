@@ -65,6 +65,8 @@ export type PlayerEntry = {
   readonly session: string | null;
   /** Lobby ready flag. When all humans are ready the race auto-starts. */
   readonly ready: boolean;
+  /** Last reported round-trip time in ms, or null if not measured. */
+  readonly rtt: number | null;
 };
 
 export type StepResult = {
@@ -171,7 +173,7 @@ export class RoomCore {
     if (session) {
       for (const [pid, entry] of this.players) {
         if (entry.session === session && entry.bot) {
-          this.players.set(pid, { ...entry, connId, bot: false, ready: false });
+          this.players.set(pid, { ...entry, connId, bot: false, ready: false, rtt: null });
           // Resume normal input processing for this vehicle.
           if (!this.inputs.has(pid)) this.inputs.set(pid, NEUTRAL_INPUT);
           this.lastHumanInputAt = this.raceTime;
@@ -212,6 +214,7 @@ export class RoomCore {
       cls: safeCls,
       session,
       ready: false,
+      rtt: null,
     });
     // No auto-start by default — players use the Start now button or the
     // per-player Ready flag to trigger the race when they're good to go.
@@ -280,6 +283,7 @@ export class RoomCore {
         cls,
         session: null,
         ready: true,
+        rtt: null,
       });
     }
     // Spawn vehicles.
@@ -514,7 +518,21 @@ export class RoomCore {
       bot: p.bot,
       cls: p.cls,
       ready: p.ready,
+      rtt: p.rtt,
     }));
+  }
+
+  /** Update a player's reported RTT. No-op if rtt change is below 10 ms. */
+  setRtt(connId: string, rtt: number): boolean {
+    if (!Number.isFinite(rtt) || rtt < 0 || rtt > 10_000) return false;
+    for (const [pid, entry] of this.players) {
+      if (entry.connId === connId && !entry.bot) {
+        if (entry.rtt !== null && Math.abs(entry.rtt - rtt) < 10) return false;
+        this.players.set(pid, { ...entry, rtt: Math.round(rtt) });
+        return true;
+      }
+    }
+    return false;
   }
 
   /**

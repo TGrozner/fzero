@@ -43,6 +43,8 @@ export type PlayerInfoMsg = {
   readonly bot: boolean;
   readonly cls: ShipClass;
   readonly ready: boolean;
+  /** Last reported round-trip time in ms, or null if not measured. */
+  readonly rtt: number | null;
 };
 
 /** Client → Server messages. */
@@ -54,7 +56,8 @@ export type ClientMessage =
   | { type: 'set_ready'; ready: boolean }
   | { type: 'set_track'; trackId: string }
   | { type: 'set_class'; cls: ShipClass }
-  | { type: 'set_laps'; laps: number };
+  | { type: 'set_laps'; laps: number }
+  | { type: 'set_rtt'; rtt: number };
 
 /** Encoded input as a tiny bit/short tuple. */
 export type InputBits = {

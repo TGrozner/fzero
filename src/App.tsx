@@ -213,6 +213,24 @@ export function App() {
     setTimeout(() => setConnectRequested(true), 120);
   }, [socket]);
 
+  // Lobby ping: 30 s cadence so other players see your RTT next to your name.
+  // Race already pings every 10 s for the local HUD; this just keeps something
+  // ticking while we're sitting in the lobby waiting to ready up.
+  useEffect(() => {
+    if (state.view !== 'lobby' || state.status !== 'connected') return;
+    const sendPing = () => socket.send({ type: 'ping', ts: performance.now() });
+    sendPing();
+    const t = window.setInterval(sendPing, 30_000);
+    return () => window.clearInterval(t);
+  }, [state.view, state.status, socket]);
+
+  // Forward our measured RTT to the server so the lobby player list can show
+  // every human's ping. Throttled by setRtt() server-side (≥10 ms change).
+  useEffect(() => {
+    if (state.rttMs === null || state.status !== 'connected') return;
+    socket.send({ type: 'set_rtt', rtt: state.rttMs });
+  }, [state.rttMs, state.status, socket]);
+
   return (
     <div className="app">
       {state.error && (

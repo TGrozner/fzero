@@ -10,6 +10,14 @@ type Player = {
   bot: boolean;
   cls: ShipClass;
   ready: boolean;
+  rtt: number | null;
+};
+
+const pingColor = (rtt: number | null): string => {
+  if (rtt === null) return '#666';
+  if (rtt < 80) return '#3eff8b';
+  if (rtt < 180) return '#ffd23a';
+  return '#ff4040';
 };
 
 type Props = {
@@ -216,6 +224,19 @@ export function Lobby({
               }}
             >
               {CLS_LABEL[p.cls]}
+            </span>
+            <span
+              aria-label={p.rtt !== null ? `${p.rtt} ms` : 'no ping data'}
+              data-testid={`ping-${p.id}`}
+              style={{
+                fontSize: 11,
+                color: pingColor(p.rtt),
+                minWidth: 42,
+                textAlign: 'right',
+                fontVariantNumeric: 'tabular-nums',
+              }}
+            >
+              {p.rtt !== null ? `${p.rtt} ms` : '— ms'}
             </span>
             <span
               aria-label={p.ready ? 'ready' : 'not ready'}

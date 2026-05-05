@@ -984,6 +984,28 @@ const drawShip = (
   }
   ctx.globalAlpha = 1;
   ctx.restore();
+
+  // Name label for human players, drawn in screen space (no rotation / bank)
+  // so it stays readable. Skipped for bots — there'd be ~95 of them on a full
+  // grid and the screen would be unreadable. Skipped for the local player too
+  // since you already know where you are.
+  if (player && !player.bot && !isMe && !ko) {
+    const nameAlpha = fa * 0.95;
+    if (nameAlpha > 0.05) {
+      ctx.save();
+      ctx.globalAlpha = nameAlpha;
+      ctx.font = '600 11px system-ui, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'bottom';
+      ctx.lineWidth = 3;
+      ctx.strokeStyle = 'rgba(0, 0, 0, 0.85)';
+      ctx.fillStyle = player.color;
+      const labelY = pivot.sy - size * 1.6;
+      ctx.strokeText(player.name, pivot.sx, labelY);
+      ctx.fillText(player.name, pivot.sx, labelY);
+      ctx.restore();
+    }
+  }
 };
 
 export const renderFrame = (

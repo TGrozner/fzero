@@ -291,6 +291,14 @@ export class Room {
       }
       return;
     }
+    if (msg.type === 'set_rtt') {
+      if (typeof msg.rtt !== 'number') return;
+      const changed = this.core.setRtt(att.connId, msg.rtt);
+      if (changed) {
+        this.broadcast({ type: 'players', players: this.core.playerInfos() });
+      }
+      return;
+    }
   }
 
   webSocketClose(ws: WebSocket, _code: number, _reason: string, _wasClean: boolean): void {
