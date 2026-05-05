@@ -20,6 +20,7 @@ import { encodeInput } from '../../shared/protocol.ts';
 import type { SocketAPI } from '../hooks/useGameSocket.ts';
 import { FLAG_KO } from '../../shared/protocol.ts';
 import { useHitPrediction } from './race/useHitPrediction.ts';
+import { useLocalPrediction } from './race/useLocalPrediction.ts';
 import { useRaceReactor } from './race/useRaceReactor.ts';
 import { TouchControls } from './TouchControls.tsx';
 import { isTouchDevice } from './isTouchDevice.ts';
@@ -68,6 +69,10 @@ export function Race({ state, dispatch, socket, onLeave }: Props) {
   // Audio + flying overlays driven by server events.
   const { lapFanfare, positionToast, perfectStart, pbToast } = useRaceReactor(state);
 
+  // Client-side prediction: simulate the local player's ship every frame so
+  // input feels reactive instead of tick-rate-bound.
+  const prediction = useLocalPrediction(state);
+
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -81,13 +86,21 @@ export function Race({ state, dispatch, socket, onLeave }: Props) {
     };
   }, []);
 
-  useGameLoop((_dt) => {
+  useGameLoop((dt) => {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const rc = setupCanvas(canvas);
     if (!rc) return;
     const now = performance.now();
-    if (!state.paused) renderFrame(rc, state, renderRef.current, now);
+    // Step the locally-predicted player ship before rendering so this frame's
+    // visuals reflect this frame's input — not what arrived in the last
+    // server snapshot.
+    if (!state.paused && state.phase === 'RACING') {
+      prediction.step(dt, keyboardToInput(keys.current));
+    }
+    if (!state.paused) {
+      renderFrame(rc, state, renderRef.current, now, prediction.pose());
+    }
     if (profileEnabled) {
       const last = lastFrameMsRef.current;
       lastFrameMsRef.current = now;

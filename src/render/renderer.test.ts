@@ -35,76 +35,71 @@ const ship = (
 
 const w = (x: number, y: number, z: number): WorldPt => ({ x, y, z });
 
-describe('computeInterpolatedShips local prediction', () => {
-  it('extrapolates the local ship forward from the latest snapshot', () => {
-    // Two snapshots 100 ms apart, ship moving at +30 px/s on x.
-    const snap = (t: number): { ships: ShipSnapshot[]; receivedAt: number } => ({
-      receivedAt: 1000 + t,
-      ships: [ship('me', t * 0.03, 0, 0, 30, 0)],
-    });
-    const a = snap(0);
-    const b = snap(100);
-    const state = {
-      ...buildInitialClientState(),
-      myId: 'me',
-      snapshots: [
-        { tick: 0, time: 0, receivedAt: a.receivedAt, ships: a.ships, racersLeft: 1, pk: 0 },
-        { tick: 1, time: 0.1, receivedAt: b.receivedAt, ships: b.ships, racersLeft: 1, pk: 0 },
-      ],
-    };
-    // Render 50 ms after the latest snapshot: dead-reckoning should advance
-    // x by 30 * 0.05 = 1.5 from the snapshot's x = 3.
-    const out = computeInterpolatedShips(state, b.receivedAt + 50);
-    const me = out.get('me');
-    expect(me?.x).toBeCloseTo(3 + 1.5, 5);
-  });
-
-  it('caps local extrapolation so a stalled WS does not catapult the ship', () => {
+describe('computeInterpolatedShips with local override', () => {
+  it('replaces the local ship pose when an override is provided', () => {
     const a = { receivedAt: 1000, ships: [ship('me', 0, 0, 0, 100, 0)] };
+    const b = { receivedAt: 1100, ships: [ship('me', 10, 0, 0, 100, 0)] };
     const state = {
       ...buildInitialClientState(),
       myId: 'me',
-      snapshots: [{ tick: 0, time: 0, receivedAt: a.receivedAt, ships: a.ships, racersLeft: 1, pk: 0 }],
-    };
-    // 5 seconds later — far beyond the 250 ms cap.
-    const out = computeInterpolatedShips(state, a.receivedAt + 5000);
-    const me = out.get('me');
-    // Capped extrap = 100 * 0.25 = 25, NOT 100 * 5 = 500.
-    expect(me?.x).toBeCloseTo(25, 5);
-  });
-
-  it('non-local ships still use the interp-delay path (no overshoot)', () => {
-    const a = { receivedAt: 1000, ships: [ship('other', 0, 0, 0, 100, 0)] };
-    const b = { receivedAt: 1100, ships: [ship('other', 10, 0, 0, 100, 0)] };
-    const state = {
-      ...buildInitialClientState(),
-      myId: 'me', // not 'other'
       snapshots: [
         { tick: 0, time: 0, receivedAt: a.receivedAt, ships: a.ships, racersLeft: 1, pk: 0 },
         { tick: 1, time: 0.1, receivedAt: b.receivedAt, ships: b.ships, racersLeft: 1, pk: 0 },
       ],
     };
-    // Render time = 1100 + 50 - 100 (interp delay) = 1050 → halfway between a and b.
-    const out = computeInterpolatedShips(state, b.receivedAt + 50);
-    const other = out.get('other');
-    expect(other?.x).toBeCloseTo(5, 1);
+    const out = computeInterpolatedShips(state, b.receivedAt + 50, {
+      x: 999,
+      y: 888,
+      h: 1.5,
+      vx: 50,
+      vy: 60,
+      flags: 7,
+    });
+    const me = out.get('me');
+    expect(me?.x).toBe(999);
+    expect(me?.y).toBe(888);
+    expect(me?.h).toBe(1.5);
   });
 
-  it('skips local prediction when myId is null (spectator path)', () => {
+  it('ignores the override when myId is null (spectator)', () => {
     const a = { receivedAt: 1000, ships: [ship('p1', 0, 0, 0, 100, 0)] };
     const b = { receivedAt: 1100, ships: [ship('p1', 10, 0, 0, 100, 0)] };
     const state = {
       ...buildInitialClientState(),
-      myId: null, // spectator
+      myId: null,
       snapshots: [
         { tick: 0, time: 0, receivedAt: a.receivedAt, ships: a.ships, racersLeft: 1, pk: 0 },
         { tick: 1, time: 0.1, receivedAt: b.receivedAt, ships: b.ships, racersLeft: 1, pk: 0 },
       ],
     };
-    const out = computeInterpolatedShips(state, b.receivedAt + 50);
+    const out = computeInterpolatedShips(state, b.receivedAt + 50, {
+      x: 999,
+      y: 888,
+      h: 0,
+      vx: 0,
+      vy: 0,
+      flags: 0,
+    });
     const p1 = out.get('p1');
-    // Interpolated halfway, NOT extrapolated forward.
+    // Interpolated halfway, override is dropped because myId is null.
     expect(p1?.x).toBeCloseTo(5, 1);
+  });
+
+  it('falls back to interpolation when no override is supplied', () => {
+    const a = { receivedAt: 1000, ships: [ship('me', 0, 0, 0, 100, 0)] };
+    const b = { receivedAt: 1100, ships: [ship('me', 10, 0, 0, 100, 0)] };
+    const state = {
+      ...buildInitialClientState(),
+      myId: 'me',
+      snapshots: [
+        { tick: 0, time: 0, receivedAt: a.receivedAt, ships: a.ships, racersLeft: 1, pk: 0 },
+        { tick: 1, time: 0.1, receivedAt: b.receivedAt, ships: b.ships, racersLeft: 1, pk: 0 },
+      ],
+    };
+    // Render time = 1100 + 50 - 100 = 1050 — halfway between snapshots.
+    const out = computeInterpolatedShips(state, b.receivedAt + 50);
+    const me = out.get('me');
+    expect(me?.x).toBeCloseTo(5, 1);
   });
 });
 

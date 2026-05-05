@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { type ClientState, findMyShip, myPosition } from '../../state.ts';
 import { getMixer } from '../../audio/mixer.ts';
+import { FLAG_FREE_BOOST, FLAG_SKYWAY } from '../../../shared/protocol.ts';
 import {
   type BestTimesStore,
   loadBestTimes,
@@ -58,6 +59,12 @@ export const useRaceReactor = (state: ClientState): RaceFx => {
   const lastPositionRef = useRef<number | null>(null);
   const lastFinishedRef = useRef(false);
   const lastPerfectStartCountRef = useRef(0);
+  // SFX-only tracking for kinematic/flag transitions on the local ship.
+  const prevPowerRef = useRef<number | null>(null);
+  const prevSkywayRef = useRef(false);
+  const prevFreeBoostRef = useRef(false);
+  const lastWallSfxAtRef = useRef(0);
+  const lastHitSfxAtRef = useRef(0);
 
   // Keep the synthwave pad running while the race screen is live.
   useEffect(() => {
@@ -115,6 +122,7 @@ export const useRaceReactor = (state: ClientState): RaceFx => {
             : 'other';
       const gain = meIs === 'other' ? 0.35 : 0.85;
       mixer.play('hit', gain);
+      if (meIs !== 'other') lastHitSfxAtRef.current = ev.at;
     }
 
     // ---- Pickups.
@@ -129,6 +137,45 @@ export const useRaceReactor = (state: ClientState): RaceFx => {
       if (ev.kind === 'boost') mixer.play('pickup-boost', gain);
       else if (ev.kind === 'heal') mixer.play('pickup-heal', gain);
       else mixer.play('pickup-mine', gain);
+    }
+
+    // ---- Wall scrapes (no dedicated event in the protocol). Detect a small
+    // power drop that can't be attributed to a recent hit or pickup-mine —
+    // those each have their own SFX. Throttle so a long wall scrape doesn't
+    // machine-gun the SFX.
+    const meForFlags = findMyShip(state);
+    if (meForFlags) {
+      const prevP = prevPowerRef.current;
+      const nowMs = performance.now();
+      if (prevP !== null) {
+        const drop = prevP - meForFlags.p;
+        const recentlyHit = nowMs - lastHitSfxAtRef.current < 250;
+        if (
+          drop > 0.005 &&
+          drop < 0.04 &&
+          !recentlyHit &&
+          nowMs - lastWallSfxAtRef.current > 220
+        ) {
+          mixer.play('wall', 0.7);
+          lastWallSfxAtRef.current = nowMs;
+        }
+      }
+      prevPowerRef.current = meForFlags.p;
+
+      // Skyway activation chime — fires once on the false → true edge.
+      const sky = (meForFlags.f & FLAG_SKYWAY) !== 0;
+      if (sky && !prevSkywayRef.current) mixer.play('skyway', 1);
+      prevSkywayRef.current = sky;
+
+      // Free-boost activation chime — fires once when the last-N boost kicks
+      // in or anytime the flag goes off → on.
+      const fb = (meForFlags.f & FLAG_FREE_BOOST) !== 0;
+      if (fb && !prevFreeBoostRef.current) mixer.play('boost-on', 0.8);
+      prevFreeBoostRef.current = fb;
+    } else {
+      prevPowerRef.current = null;
+      prevSkywayRef.current = false;
+      prevFreeBoostRef.current = false;
     }
 
     // ---- Lap progression: fanfare, finish, lap PB, race PB.

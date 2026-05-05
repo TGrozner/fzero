@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { TRACKS } from '../../shared/track.ts';
 import { SHIP_CLASSES, type ShipClass } from '../../shared/constants.ts';
 import { ALLOWED_LAPS } from '../../shared/roomCore.ts';
+import { getMixer } from '../audio/mixer.ts';
 
 type Player = {
   id: string;
@@ -107,9 +108,19 @@ export function Lobby({
     if (prevTrackRef.current === trackId) return;
     prevTrackRef.current = trackId;
     setTrackJustChanged(true);
+    getMixer().play('ui-notify', 0.7);
     const t = window.setTimeout(() => setTrackJustChanged(false), 1200);
     return () => window.clearTimeout(t);
   }, [trackId]);
+
+  // Notify when a new human pilot joins the room.
+  const prevHumanCountRef = useRef(humans.length);
+  useEffect(() => {
+    if (humans.length > prevHumanCountRef.current) {
+      getMixer().play('ui-notify', 0.5);
+    }
+    prevHumanCountRef.current = humans.length;
+  }, [humans.length]);
 
   useEffect(() => {
     if (!copied) return;
@@ -214,7 +225,10 @@ export function Lobby({
           {SHIP_CLASSES.map((c) => (
             <button
               key={c}
-              onClick={() => onSetClass(c)}
+              onClick={() => {
+                getMixer().play('ui-click');
+                onSetClass(c);
+              }}
               data-testid={`class-${c}`}
               aria-pressed={me.cls === c}
               title={CLS_TIP[c]}
@@ -333,7 +347,10 @@ export function Lobby({
       <div style={{ display: 'flex', gap: 10, justifyContent: 'center', flexWrap: 'wrap', marginTop: 6 }}>
         {me && (
           <button
-            onClick={() => onSetReady(!me.ready)}
+            onClick={() => {
+              getMixer().play('ui-click');
+              onSetReady(!me.ready);
+            }}
             data-testid="ready-toggle"
             title="Race auto-starts when everyone in the lobby is ready"
             style={{ minWidth: 130, background: me.ready ? '#1a4a2a' : undefined }}

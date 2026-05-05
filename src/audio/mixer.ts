@@ -24,7 +24,15 @@ export type SfxKind =
   | 'lap'
   | 'finish'
   | 'wall'
-  | 'overtake';
+  | 'overtake'
+  /** Lobby/UI click feedback (ready toggle, class change, etc.). */
+  | 'ui-click'
+  /** Lobby notification — a player joined, the track winner changed. */
+  | 'ui-notify'
+  /** Skyway activation whoosh on the local player. */
+  | 'skyway'
+  /** Boost activation whoosh — tiny crisp sound on every boost engage. */
+  | 'boost-on';
 
 export type AudioSettings = {
   volume: number; // 0..1
@@ -160,10 +168,32 @@ export class AudioMixer {
         beep(ctx, dest, t + 0.3, { freq: 784, dur: 0.32, type: 'triangle', gain: 0.3 * gain });
         break;
       case 'wall':
+        // Crunch + brief low thud so wall scrapes have body without screaming
+        // over the rest of the mix.
         noiseBurst(ctx, dest, t, { dur: 0.1, gain: 0.28 * gain, lp: 1200 });
+        beep(ctx, dest, t, { freq: 90, dur: 0.1, type: 'square', gain: 0.18 * gain });
         break;
       case 'overtake':
         sweep(ctx, dest, t, { f0: 440, f1: 880, dur: 0.16, type: 'sine', gain: 0.18 * gain });
+        break;
+      case 'ui-click':
+        // Crisp short click — UI feedback only, intentionally subdued.
+        beep(ctx, dest, t, { freq: 1200, dur: 0.04, type: 'square', gain: 0.1 * gain });
+        break;
+      case 'ui-notify':
+        // Two-tone perfect-fourth chirp — pleasant, non-intrusive.
+        beep(ctx, dest, t, { freq: 880, dur: 0.08, type: 'triangle', gain: 0.12 * gain });
+        beep(ctx, dest, t + 0.06, { freq: 1175, dur: 0.1, type: 'triangle', gain: 0.12 * gain });
+        break;
+      case 'skyway':
+        // Ascending shimmer + airy noise — distinct from boost.
+        sweep(ctx, dest, t, { f0: 660, f1: 1760, dur: 0.45, type: 'sine', gain: 0.22 * gain });
+        noiseBurst(ctx, dest, t, { dur: 0.45, gain: 0.18 * gain, lp: 4000 });
+        break;
+      case 'boost-on':
+        // Quick rising chirp — fires on activation, not while held (the engine
+        // pad already covers sustained boost via setEngineSpeed).
+        sweep(ctx, dest, t, { f0: 320, f1: 560, dur: 0.14, type: 'sawtooth', gain: 0.18 * gain });
         break;
     }
   }
