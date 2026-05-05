@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import { HUD } from './HUD.tsx';
 import { buildInitialClientState } from '../state.ts';
+import { TOTAL_LAPS } from '../../shared/constants.ts';
 
 describe('HUD', () => {
   it('does not render when there is no ship snapshot yet', () => {
@@ -29,7 +30,7 @@ describe('HUD', () => {
       ],
     };
     render(<HUD state={state} />);
-    expect(screen.getByTestId('lap')).toHaveTextContent('Lap 2/3');
+    expect(screen.getByTestId('lap')).toHaveTextContent(`Lap 2/${TOTAL_LAPS}`);
     expect(screen.getByTestId('time')).toHaveTextContent('0:12.50');
     expect(screen.getByTestId('racers-left')).toHaveTextContent('87');
     const power = screen.getByTestId('power-meter').querySelector('.fill') as HTMLElement;

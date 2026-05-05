@@ -1,4 +1,4 @@
-import type { RoomPhase, ShipClass } from '../shared/constants.ts';
+import { TOTAL_LAPS, type RoomPhase, type ShipClass } from '../shared/constants.ts';
 import type { PlayerInfoMsg, ServerMessage, ShipSnapshot } from '../shared/protocol.ts';
 
 export type ConnectionStatus = 'idle' | 'connecting' | 'connected' | 'closed' | 'error';
@@ -118,7 +118,7 @@ export const buildInitialClientState = (): ClientState => ({
   phase: 'WAITING',
   countdown: 0,
   startsIn: -1,
-  laps: 3,
+  laps: TOTAL_LAPS,
   spectator: false,
   players: {},
   snapshots: [],
