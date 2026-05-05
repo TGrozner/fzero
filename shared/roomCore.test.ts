@@ -119,6 +119,58 @@ describe('RoomCore lifecycle', () => {
     expect(r.setClass('c1', 'bogus' as never)).toBe(false);
   });
 
+  it('setClass returns false when nothing changes or no matching player', () => {
+    const r = new RoomCore();
+    r.addHuman('c1', 'A', '#3aa0ff');
+    expect(r.setClass('c1', 'balanced')).toBe(false); // already balanced
+    expect(r.setClass('unknown-conn', 'speed')).toBe(false); // no match
+  });
+
+  it('setRtt records valid values, debounces small changes, rejects nonsense', () => {
+    const r = new RoomCore();
+    r.addHuman('c1', 'A', '#3aa0ff');
+    expect(r.setRtt('c1', 42)).toBe(true);
+    expect([...r.players.values()][0]?.rtt).toBe(42);
+    expect(r.setRtt('c1', 47)).toBe(false); // <10 ms change → no broadcast
+    expect(r.setRtt('c1', 200)).toBe(true);
+    expect(r.setRtt('c1', -5)).toBe(false); // negative
+    expect(r.setRtt('c1', NaN)).toBe(false); // not finite
+    expect(r.setRtt('c1', 99_999)).toBe(false); // too large
+    expect(r.setRtt('unknown', 100)).toBe(false); // no matching connection
+  });
+
+  it('setReady is a no-op for an unknown connection', () => {
+    const r = new RoomCore();
+    r.addHuman('c1', 'A', '#3aa0ff');
+    const out = r.setReady('not-a-real-conn', true);
+    expect(out.allReady).toBe(false);
+    expect(out.humans).toBe(1); // count is real, but the unknown was a no-op
+    expect([...r.players.values()][0]?.ready).toBe(false);
+  });
+
+  it('setTrackVote dedupes a vote for the same track the player already chose', () => {
+    const r = new RoomCore('mute-avenue');
+    r.addHuman('c1', 'A', '#3aa0ff');
+    // Default vote is the room's current track.
+    const first = r.setTrackVote('c1', 'mute-avenue');
+    expect(first.voteRecorded).toBe(false);
+    expect(first.trackChanged).toBe(false);
+  });
+
+  it('setTrackVote on a non-matching connection records nothing', () => {
+    const r = new RoomCore('mute-avenue');
+    r.addHuman('c1', 'A', '#3aa0ff');
+    expect(r.setTrackVote('unknown-conn', 'big-blue').voteRecorded).toBe(false);
+    expect(r.track.id).toBe('mute-avenue');
+  });
+
+  it('isHost is false when the connection is not in the room', () => {
+    const r = new RoomCore();
+    r.addHuman('c1', 'A', '#3aa0ff');
+    expect(r.isHost('c1')).toBe(true);
+    expect(r.isHost('not-here')).toBe(false);
+  });
+
   it('removeHuman during WAITING removes the slot', () => {
     const r = new RoomCore();
     r.addHuman('c1', 'A', '#3aa0ff');

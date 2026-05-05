@@ -1,20 +1,40 @@
 name: Deploy
 
+# Deploy is gated on CI: it ONLY runs after the CI workflow completes
+# successfully on a main-branch push. A red CI no longer ships to prod.
+# Manual dispatch is still available as an escape hatch.
+
 on:
-  push:
-    branches: [main]
+  workflow_run:
+    workflows: ['CI']
+    types: [completed]
   workflow_dispatch:
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    if: github.repository == 'TGrozner/neon-drift'
     timeout-minutes: 15
+    # workflow_run path: only deploy after a green CI run on main, from a push.
+    # workflow_dispatch path: always run (manual override).
+    if: |
+      github.repository == 'TGrozner/neon-drift'
+      && (
+        github.event_name == 'workflow_dispatch'
+        || (
+          github.event.workflow_run.conclusion == 'success'
+          && github.event.workflow_run.head_branch == 'main'
+          && github.event.workflow_run.event == 'push'
+        )
+      )
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
     steps:
       - uses: actions/checkout@v4
+        # Check out the exact commit CI tested. For workflow_dispatch this is
+        # null and falls back to the workflow's default ref (main).
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.ref }}
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
