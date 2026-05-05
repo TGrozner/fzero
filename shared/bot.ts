@@ -64,7 +64,7 @@ export const botInput = (
   // Lookahead distance scales with speed; better skill = more lookahead.
   const lookahead = clamp(20 + speed * (0.4 + profile.skill * 0.6), 25, 200);
 
-  const projection = closestOnTrack(track, bot.pos);
+  const projection = closestOnTrack(track, bot.pos, bot.lastSegIdx);
   const targetPoint = lookaheadPoint(track, projection.arcLength, lookahead);
   const toTarget = sub(targetPoint, bot.pos);
   const desiredAngle = angleOf(toTarget);

@@ -41,7 +41,7 @@ export const updateLapProgress = (
   raceTime: number,
 ): Vehicle => {
   if (v.finished || v.ko) return v;
-  const c = closestOnTrack(config.track, v.pos);
+  const c = closestOnTrack(config.track, v.pos, v.lastSegIdx);
   const trackLen = config.track.length;
   const lapBase = v.lap * trackLen;
   const projected = lapBase + c.arcLength;
@@ -64,7 +64,9 @@ export const updateLapProgress = (
   let koMeter = v.koMeter;
   const cps = config.track.checkpoints;
   for (let safety = 0; safety < cps.length + 1; safety++) {
+    if (nextCp >= cps.length) break;
     const cpIdx = cps[nextCp] as number;
+    if (cpIdx === undefined) break;
     const cpArc = (config.track.cumulative[cpIdx] as number) + lap * trackLen;
     if (newArc >= cpArc) {
       nextCp += 1;
