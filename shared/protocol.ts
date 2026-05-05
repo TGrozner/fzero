@@ -52,7 +52,9 @@ export type ClientMessage =
   | { type: 'ping'; ts: number }
   | { type: 'start_now' }
   | { type: 'set_ready'; ready: boolean }
-  | { type: 'set_track'; trackId: string };
+  | { type: 'set_track'; trackId: string }
+  | { type: 'set_class'; cls: ShipClass }
+  | { type: 'set_laps'; laps: number };
 
 /** Encoded input as a tiny bit/short tuple. */
 export type InputBits = {
@@ -76,6 +78,7 @@ export type ServerMessage =
       type: 'welcome';
       yourId: string;
       track: string;
+      laps: number;
       players: PlayerInfoMsg[];
       phase: RoomPhase;
       countdown: number;
@@ -103,6 +106,7 @@ export type ServerMessage =
     }
   | { type: 'phase'; phase: RoomPhase; countdown?: number; startsIn?: number }
   | { type: 'track-changed'; trackId: string }
+  | { type: 'laps-changed'; laps: number }
   | { type: 'ko'; id: string; by: string | null; time: number }
   | {
       /**

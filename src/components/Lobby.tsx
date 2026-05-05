@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { TRACKS } from '../../shared/track.ts';
-import type { ShipClass } from '../../shared/constants.ts';
+import { SHIP_CLASSES, type ShipClass } from '../../shared/constants.ts';
+import { ALLOWED_LAPS } from '../../shared/roomCore.ts';
 
 type Player = {
   id: string;
@@ -13,6 +14,7 @@ type Player = {
 
 type Props = {
   trackId: string;
+  laps: number;
   players: Player[];
   myId: string | null;
   roomName: string;
@@ -20,12 +22,20 @@ type Props = {
   onStartNow: () => void;
   onSetReady: (ready: boolean) => void;
   onSetTrack: (trackId: string) => void;
+  onSetClass: (cls: ShipClass) => void;
+  onSetLaps: (laps: number) => void;
 };
 
 const CLS_LABEL: Record<ShipClass, string> = {
   speed: 'SPD',
   tank: 'TNK',
   balanced: 'BAL',
+};
+
+const CLS_FULL: Record<ShipClass, string> = {
+  speed: 'Speed',
+  tank: 'Tank',
+  balanced: 'Balanced',
 };
 
 /**
@@ -45,6 +55,7 @@ const buildInviteUrl = (room: string): string => {
 
 export function Lobby({
   trackId,
+  laps,
   players,
   myId,
   roomName,
@@ -52,6 +63,8 @@ export function Lobby({
   onStartNow,
   onSetReady,
   onSetTrack,
+  onSetClass,
+  onSetLaps,
 }: Props) {
   const humans = players.filter((p) => !p.bot);
   const me = myId ? humans.find((p) => p.id === myId) ?? null : null;
@@ -91,21 +104,61 @@ export function Lobby({
     <div className="menu lobby-screen" data-testid="lobby">
       <h1>Lobby</h1>
 
-      <label className="lobby-info" style={{ display: 'flex', gap: 8, alignItems: 'center', justifyContent: 'center' }}>
-        Track:
-        <select
-          data-testid="track-select"
-          value={trackId}
-          onChange={(e) => onSetTrack(e.target.value)}
-          style={{ minWidth: 160 }}
+      <div className="lobby-info" style={{ display: 'flex', gap: 16, alignItems: 'center', justifyContent: 'center', flexWrap: 'wrap' }}>
+        <label style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+          Track:
+          <select
+            data-testid="track-select"
+            value={trackId}
+            onChange={(e) => onSetTrack(e.target.value)}
+            style={{ minWidth: 140 }}
+          >
+            {TRACKS.map((t) => (
+              <option key={t.id} value={t.id}>
+                {t.name}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+          Laps:
+          <select
+            data-testid="laps-select"
+            value={laps}
+            onChange={(e) => onSetLaps(Number(e.target.value))}
+          >
+            {ALLOWED_LAPS.map((n) => (
+              <option key={n} value={n}>
+                {n}
+              </option>
+            ))}
+          </select>
+        </label>
+      </div>
+
+      {me && (
+        <div
+          className="lobby-info"
+          style={{ display: 'flex', gap: 6, alignItems: 'center', justifyContent: 'center', flexWrap: 'wrap' }}
         >
-          {TRACKS.map((t) => (
-            <option key={t.id} value={t.id}>
-              {t.name}
-            </option>
+          Your ship:
+          {SHIP_CLASSES.map((c) => (
+            <button
+              key={c}
+              onClick={() => onSetClass(c)}
+              data-testid={`class-${c}`}
+              aria-pressed={me.cls === c}
+              style={{
+                minWidth: 84,
+                background: me.cls === c ? '#1a4a2a' : undefined,
+                fontWeight: me.cls === c ? 'bold' : undefined,
+              }}
+            >
+              {CLS_FULL[c]}
+            </button>
           ))}
-        </select>
-      </label>
+        </div>
+      )}
 
       <div className="pulse">
         {humans.length} pilot{humans.length === 1 ? '' : 's'}

@@ -165,10 +165,41 @@ export function App() {
     state.cls,
   );
 
-  const handleStart = useCallback(() => {
-    setConnectRequested(true);
+  const handleStart = useCallback(async () => {
     getMixer().unlock();
-  }, []);
+    // Pre-flight the room: if a race is already in progress, surface a clear
+    // "wait then retry" message instead of a silent reconnect storm.
+    try {
+      const baseUrl = (() => {
+        const env = (import.meta as { env?: Record<string, string | undefined> }).env;
+        const fromEnv = env?.['VITE_SERVER_URL'];
+        if (fromEnv) return fromEnv.replace(/^wss?:\/\//, 'https://').replace(/\/ws.*$/, '');
+        if (typeof window !== 'undefined') {
+          if (['localhost', '127.0.0.1'].includes(window.location.hostname)) {
+            return 'http://127.0.0.1:8787';
+          }
+          return window.location.origin;
+        }
+        return '';
+      })();
+      const room = state.roomName ? `?room=${encodeURIComponent(state.roomName)}` : '';
+      const res = await fetch(`${baseUrl}/status${room}`);
+      if (res.ok) {
+        const j: { phase: string; humans: number } = await res.json();
+        if (j.phase !== 'WAITING') {
+          dispatch({
+            type: 'CONNECTION_ERROR',
+            error: `Race already in progress in this room (${j.humans} human${j.humans === 1 ? '' : 's'}). Wait a moment and retry.`,
+          });
+          return;
+        }
+      }
+    } catch {
+      // /status is best-effort; if it fails (e.g. dev server, old worker), just
+      // proceed to connect and let the WS error path handle any rejection.
+    }
+    setConnectRequested(true);
+  }, [state.roomName]);
 
   const handleLeave = useCallback(() => {
     setConnectRequested(false);
@@ -205,6 +236,7 @@ export function App() {
       {state.view === 'lobby' && (
         <Lobby
           trackId={state.trackId}
+          laps={state.laps}
           players={Object.values(state.players)}
           myId={state.myId}
           roomName={state.roomName}
@@ -212,6 +244,8 @@ export function App() {
           onStartNow={() => socket.send({ type: 'start_now' })}
           onSetReady={(ready) => socket.send({ type: 'set_ready', ready })}
           onSetTrack={(trackId) => socket.send({ type: 'set_track', trackId })}
+          onSetClass={(cls) => socket.send({ type: 'set_class', cls })}
+          onSetLaps={(n) => socket.send({ type: 'set_laps', laps: n })}
         />
       )}
       {state.view === 'race' && (

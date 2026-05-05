@@ -60,6 +60,34 @@ describe('RoomCore lifecycle', () => {
     expect(r.setTrack('big-blue')).toBe(false);
   });
 
+  it('setLaps applies a valid lap count and rejects bogus values', () => {
+    const r = new RoomCore();
+    r.addHuman('c1', 'A', '#3aa0ff');
+    r.setReady('c1', true);
+    expect(r.totalLaps).toBe(3);
+    expect(r.setLaps(5)).toBe(true);
+    expect(r.totalLaps).toBe(5);
+    expect(r.config.totalLaps).toBe(5);
+    expect([...r.players.values()][0]?.ready).toBe(false);
+    expect(r.setLaps(7)).toBe(false);
+    expect(r.setLaps(5)).toBe(false); // unchanged
+  });
+
+  it('setClass updates a single player without resetting ready', () => {
+    const r = new RoomCore();
+    r.addHuman('c1', 'A', '#3aa0ff');
+    r.addHuman('c2', 'B', '#ff4040');
+    r.setReady('c1', true);
+    r.setReady('c2', true);
+    expect(r.setClass('c1', 'speed')).toBe(true);
+    const a = [...r.players.values()].find((p) => p.connId === 'c1');
+    const b = [...r.players.values()].find((p) => p.connId === 'c2');
+    expect(a?.cls).toBe('speed');
+    expect(a?.ready).toBe(true); // class change shouldn't unmark
+    expect(b?.ready).toBe(true);
+    expect(r.setClass('c1', 'bogus' as never)).toBe(false);
+  });
+
   it('removeHuman during WAITING removes the slot', () => {
     const r = new RoomCore();
     r.addHuman('c1', 'A', '#3aa0ff');

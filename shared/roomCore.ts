@@ -86,9 +86,13 @@ const nextId = (prefix: string) => {
  * Pure-ish room core. Owns the simulation, players, and lifecycle.
  * The Durable Object wrapper is a thin shell around it.
  */
+/** Lap counts the lobby UI exposes — anything else is rejected by setLaps. */
+export const ALLOWED_LAPS: readonly number[] = [1, 2, 3, 5];
+
 export class RoomCore {
   phase: RoomPhase = 'WAITING';
   track: Track;
+  totalLaps: number = TOTAL_LAPS;
   config = buildRaceConfig(TRACKS[0] as Track, TOTAL_LAPS);
   players = new Map<string, PlayerEntry>();
   /** Vehicle id → Vehicle. */
@@ -129,7 +133,7 @@ export class RoomCore {
     lobbyAutoStartS?: number,
   ) {
     this.track = findTrack(trackId);
-    this.config = buildRaceConfig(this.track, TOTAL_LAPS);
+    this.config = buildRaceConfig(this.track, this.totalLaps);
     this.snapIntervalMs = snapIntervalMs;
     if (lobbyAutoStartS !== undefined) this.lobbyAutoStartS = lobbyAutoStartS;
     this.rebuildPickups();
@@ -178,6 +182,7 @@ export class RoomCore {
               type: 'welcome',
               yourId: pid,
               track: this.track.id,
+              laps: this.totalLaps,
               players: this.playerInfos(),
               phase: this.phase,
               countdown: this.countdown,
@@ -217,6 +222,7 @@ export class RoomCore {
         type: 'welcome',
         yourId: id,
         track: this.track.id,
+        laps: this.totalLaps,
         players: this.playerInfos(),
         phase: this.phase,
         countdown: this.countdown,
@@ -543,7 +549,7 @@ export class RoomCore {
     } catch {
       return false;
     }
-    this.config = buildRaceConfig(this.track, TOTAL_LAPS);
+    this.config = buildRaceConfig(this.track, this.totalLaps);
     this.rebuildPickups();
     // Switching track invalidates lobby readiness (different track → different
     // commitment). Reset everyone to not-ready.
@@ -551,6 +557,36 @@ export class RoomCore {
       if (entry.ready) this.players.set(pid, { ...entry, ready: false });
     }
     return true;
+  }
+
+  /** Change race length. Only allowed during WAITING; resets ready flags. */
+  setLaps(laps: number): boolean {
+    if (this.phase !== 'WAITING') return false;
+    if (!ALLOWED_LAPS.includes(laps)) return false;
+    if (laps === this.totalLaps) return false;
+    this.totalLaps = laps;
+    this.config = buildRaceConfig(this.track, this.totalLaps);
+    for (const [pid, entry] of this.players) {
+      if (entry.ready) this.players.set(pid, { ...entry, ready: false });
+    }
+    return true;
+  }
+
+  /**
+   * Change a single player's ship class in WAITING. Doesn't reset ready —
+   * picking a class is your own decision and shouldn't unmark the room.
+   */
+  setClass(connId: string, cls: ShipClass): boolean {
+    if (this.phase !== 'WAITING') return false;
+    if (!SHIP_CLASSES.includes(cls)) return false;
+    for (const [pid, entry] of this.players) {
+      if (entry.connId === connId && !entry.bot) {
+        if (entry.cls === cls) return false;
+        this.players.set(pid, { ...entry, cls });
+        return true;
+      }
+    }
+    return false;
   }
 
   snapshotShips(): ShipSnapshot[] {

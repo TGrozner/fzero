@@ -45,6 +45,16 @@ export default {
     if (url.pathname === '/health') {
       return new Response('ok', { status: 200, headers: CORS_HEADERS });
     }
+    if (url.pathname === '/status') {
+      // Lightweight pre-flight so the client can show "Race in progress —
+      // wait or pick another room" before attempting a WS upgrade. One DO
+      // request per check; clients should not poll faster than every few s.
+      const roomName = sanitizeRoomName(url.searchParams.get('room'));
+      const id = env.ROOM.idFromName(roomName);
+      const stub = env.ROOM.get(id);
+      const fwd = new Request(`https://room/status`, request);
+      return stub.fetch(fwd);
+    }
     if (url.pathname === '/ws') {
       const roomName = sanitizeRoomName(url.searchParams.get('room'));
       const trackId = url.searchParams.get('track') ?? 'mute-avenue';
@@ -113,6 +123,19 @@ export class Room {
 
   async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url);
+    if (url.pathname === '/status') {
+      const humans = [...this.core.players.values()].filter((p) => !p.bot).length;
+      return new Response(
+        JSON.stringify({
+          phase: this.core.phase,
+          humans,
+          maxPlayers: 99,
+          trackId: this.core.track.id,
+          laps: this.core.totalLaps,
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json', ...CORS_HEADERS } },
+      );
+    }
     if (url.pathname !== '/ws') return new Response('not found', { status: 404 });
     const upgrade = request.headers.get('Upgrade');
     if (upgrade?.toLowerCase() !== 'websocket') {
@@ -247,6 +270,23 @@ export class Room {
       const changed = this.core.setTrack(msg.trackId);
       if (changed) {
         this.broadcast({ type: 'track-changed', trackId: msg.trackId });
+        this.broadcast({ type: 'players', players: this.core.playerInfos() });
+      }
+      return;
+    }
+    if (msg.type === 'set_laps') {
+      if (typeof msg.laps !== 'number') return;
+      const changed = this.core.setLaps(msg.laps);
+      if (changed) {
+        this.broadcast({ type: 'laps-changed', laps: this.core.totalLaps });
+        this.broadcast({ type: 'players', players: this.core.playerInfos() });
+      }
+      return;
+    }
+    if (msg.type === 'set_class') {
+      if (typeof msg.cls !== 'string') return;
+      const changed = this.core.setClass(att.connId, msg.cls);
+      if (changed) {
         this.broadcast({ type: 'players', players: this.core.playerInfos() });
       }
       return;

@@ -68,6 +68,8 @@ export type ClientState = {
   phase: RoomPhase;
   countdown: number;
   startsIn: number;
+  /** Total laps this room is currently configured for. */
+  laps: number;
   players: Record<string, PlayerInfoMsg>;
   /** Ring of recent snapshots (newest last). */
   snapshots: Snapshot[];
@@ -110,6 +112,7 @@ export const buildInitialClientState = (): ClientState => ({
   phase: 'WAITING',
   countdown: 0,
   startsIn: -1,
+  laps: 3,
   players: {},
   snapshots: [],
   racersLeft: 99,
@@ -202,6 +205,7 @@ const applyServer = (
         ...state,
         myId: msg.yourId,
         trackId: msg.track,
+        laps: msg.laps,
         phase: msg.phase,
         countdown: msg.countdown,
         startsIn: msg.startsIn,
@@ -324,6 +328,8 @@ const applyServer = (
       return { ...state, rttMs: now - msg.ts };
     case 'track-changed':
       return { ...state, trackId: msg.trackId };
+    case 'laps-changed':
+      return { ...state, laps: msg.laps };
   }
 };
 

@@ -48,7 +48,7 @@ describe('reducer', () => {
       type: 'SERVER_MESSAGE',
       receivedAt: 0,
       message: {
-        type: 'welcome',
+        type: 'welcome', laps: 3,
         yourId: 'p1',
         track: 'mute-avenue',
         phase: 'WAITING',
@@ -195,7 +195,7 @@ describe('reducer', () => {
       type: 'SERVER_MESSAGE',
       receivedAt: 1000,
       message: {
-        type: 'welcome',
+        type: 'welcome', laps: 3,
         yourId: 'me',
         track: 'mute-avenue',
         phase: 'RACING',
@@ -219,7 +219,7 @@ describe('reducer', () => {
       type: 'SERVER_MESSAGE',
       receivedAt: 1000,
       message: {
-        type: 'welcome',
+        type: 'welcome', laps: 3,
         yourId: 'me',
         track: 'mute-avenue',
         phase: 'RACING',
@@ -241,7 +241,7 @@ describe('reducer', () => {
       type: 'SERVER_MESSAGE',
       receivedAt: 1000,
       message: {
-        type: 'welcome',
+        type: 'welcome', laps: 3,
         yourId: 'p1',
         track: 'mute-avenue',
         phase: 'RACING',
@@ -264,7 +264,7 @@ describe('reducer', () => {
       type: 'SERVER_MESSAGE',
       receivedAt: 1000,
       message: {
-        type: 'welcome',
+        type: 'welcome', laps: 3,
         yourId: 'p1',
         track: 'mute-avenue',
         phase: 'RACING',
