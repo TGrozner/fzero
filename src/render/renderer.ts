@@ -64,10 +64,9 @@ const CAM_HEADING_DECAY = 8;
 const MINIMAP_HEADING_DECAY = 6;
 /** Decay constant for the per-ship bank smoother (per second). */
 const SHIP_BANK_DECAY = 9;
-// 1 full server tick (5 Hz → 200 ms) so we always have a "next" snapshot to
-// interpolate toward. Increases visual latency by ~120 ms vs 10 Hz, which is
-// the cost of fitting under the Cloudflare free tier.
-const INTERP_DELAY_MS = 200;
+// 1 full server tick (10 Hz → 100 ms) so we always have a "next" snapshot to
+// interpolate toward without lagging far enough behind that inputs feel mushy.
+const INTERP_DELAY_MS = 100;
 const FOG_START = 60;
 const FOG_END = 480;
 const STAR_COUNT = 80;

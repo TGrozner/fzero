@@ -123,9 +123,9 @@ export function Race({ state, dispatch, socket, onLeave }: Props) {
       }
     }
 
-    // Send input at the server tick rate (5Hz). Each input is a DO request,
-    // so this is the second-largest cost driver after the alarm itself.
-    if (state.phase === 'RACING' && state.myId && now - lastInputSentRef.current > 200) {
+    // Send input at the server tick rate (10 Hz). Aligned with SERVER_TICK_HZ
+    // so the server has a fresh input every tick — important for racing feel.
+    if (state.phase === 'RACING' && state.myId && now - lastInputSentRef.current > 100) {
       lastInputSentRef.current = now;
       const input = keyboardToInput(keys.current);
       socket.send({ type: 'input', ts: now, in: encodeInput(input) });

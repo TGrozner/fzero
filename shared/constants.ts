@@ -8,10 +8,11 @@ export const VEHICLE_RADIUS = 5;
 export const TOTAL_LAPS = 3;
 
 /** Server simulation tick rate (alarm fires this often + snapshot is broadcast).
- *  5 Hz: each alarm fire is one DO request, so tick rate is the dominant cost
- *  driver on the Cloudflare free tier. The client interpolates between
- *  snapshots so the lower rate is invisible to players. */
-export const SERVER_TICK_HZ = 5;
+ *  10 Hz keeps inputs feeling responsive on a racing game; the client still
+ *  interpolates between snapshots to smooth the gap. Each alarm = one DO
+ *  request, so doubling this also doubles consumption — at current cadence
+ *  we're still well under 10 % of the daily Workers free tier. */
+export const SERVER_TICK_HZ = 10;
 export const SERVER_TICK_MS = 1000 / SERVER_TICK_HZ;
 
 /** Snapshot broadcast rate — aligned with the alarm tick so we emit one per fire. */

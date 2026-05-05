@@ -45,9 +45,8 @@ A 99-player synthwave anti-grav battle-royale racer, built end-to-end with React
 - **Mobile-ready** — touch joystick + action buttons on phones / tablets.
 
 ### Net
-- Server-authoritative simulation at **5 Hz** (one tick = one Durable Object alarm). Client
-  interpolates between snapshots so the lower rate is invisible at the wheel — the rate is tuned
-  to keep the project under the Cloudflare Workers free tier (see below).
+- Server-authoritative simulation at **10 Hz** (one tick = one Durable Object alarm). Client
+  interpolates between snapshots so the gap is invisible at the wheel.
 
 ## Stack
 
@@ -160,7 +159,7 @@ e2e/           # Playwright tests
                                                       ▼
                                           ┌──────────────────────┐
                                           │ RoomCore (pure TS)   │
-                                          │  - 5 Hz simulation   │
+                                          │  - 10 Hz simulation  │
                                           │  - 99 vehicles       │
                                           │  - bot AI in-loop    │
                                           └──────────────────────┘
@@ -193,11 +192,11 @@ Option 1 is the cheapest (one less hop, no Pages Function invocations). Option 2
 Designed to run cleanly on the Workers free tier (100 k requests / day total — covers Worker
 invocations + Durable Object requests + Pages Functions). Built-in protections:
 
-- **5 Hz simulation tick** — the dominant cost driver. Each alarm fire is one DO request; client
-  interpolation (200 ms render delay) hides the lower rate. See `SERVER_TICK_HZ` in
-  [shared/constants.ts](shared/constants.ts).
-- **5 Hz client input throttle** — inputs are aligned with the tick rate; a misbehaving client gets
-  closed by the per-socket rate limiter (`WS_INPUT_RATE_LIMIT_PER_S` = 30, ~6× headroom).
+- **10 Hz simulation tick** — the dominant cost driver. Each alarm fire is one DO request; client
+  interpolation (100 ms render delay) hides the gap between snapshots. See `SERVER_TICK_HZ` in
+  [shared/constants.ts](shared/constants.ts) — drop to 5 Hz if you start scraping the daily limit.
+- **10 Hz client input throttle** — inputs are aligned with the tick rate; a misbehaving client
+  gets closed by the per-socket rate limiter (`WS_INPUT_RATE_LIMIT_PER_S` = 30, ~3× headroom).
 - **1 Hz alarm in WAITING** — lobbies bleed `startsIn` once a second instead of 5×.
 - **Empty-room hibernation** — Durable Object alarms stop scheduling once the last player leaves
   AND the room is back in WAITING.

@@ -56,11 +56,12 @@ adheres loosely to [SemVer](https://semver.org/).
   of whether anyone wanted to play is gone. Players control the launch via
   the per-player Ready toggle (race auto-starts when everyone's ticked) or
   the host's Start Now override.
-- **Server tick rate dropped from 10 Hz to 5 Hz** (and client input rate
-  matched) to stay under the Cloudflare Workers free tier (100 k req / day
-  total). `INTERP_DELAY_MS` bumped from 80 ms to 200 ms (one full tick) so
-  the client always has a "next" snapshot to lerp toward; the visual hit is
-  ~120 ms of extra remote-ship latency, masked by interpolation.
+- **Server tick rate stays at 10 Hz** with client input rate matched — a
+  brief experiment at 5 Hz (to maximise free-tier headroom) made the racing
+  feel noticeably mushy in real play, so it was reverted. `INTERP_DELAY_MS`
+  is 100 ms (one full tick) for smooth interpolation without making inputs
+  feel laggy. Drop both rates if free-tier consumption ever becomes a
+  problem.
 - Outer Worker → Durable Object subfetch now forwards every query param
   except `?room=` (was stripping `?session=` and `?spectator=`, which
   broke reconnection and made spectator mode unreachable).
