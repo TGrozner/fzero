@@ -859,6 +859,67 @@ canvas {
   transform: scale(0.92);
 }
 
+/* Touch-mode HUD reflow — keep race instruments out of the thumb-zones at
+   the bottom corners (where the button clusters live) and the top-left
+   (where the pause / leave UI buttons live). Two orientations are handled
+   separately so we get the densest layout for each. */
+@media (pointer: coarse) {
+  /* Top-left UI buttons (pause + leave) take ≈ 116 px; shift the lap timer
+     row right so it doesn't sit underneath them. */
+  .hud-top {
+    left: max(130px, calc(env(safe-area-inset-left) + 130px));
+    gap: 10px;
+  }
+  .hud-top .position { font-size: 22px; }
+  .hud-top .position .total { font-size: 12px; }
+  .hud-top .lap { font-size: 12px; }
+  .hud-top .time { font-size: 14px; }
+  .hud-top .speed { font-size: 14px; }
+}
+
+@media (pointer: coarse) and (orientation: portrait) {
+  /* Bottom HUD strip moves ABOVE the button clusters and centres so the
+     player can see power / KO / cooldowns without the buttons sitting on
+     top of them. ~200 px clears the 84+12+72 button stack + safe-area. */
+  .hud-bar {
+    bottom: max(206px, calc(env(safe-area-inset-bottom) + 206px));
+    left: 50%;
+    transform: translateX(-50%);
+    width: min(360px, calc(100vw - 32px));
+  }
+  /* Minimap doesn't add anything useful at portrait widths and would
+     overlap the right cluster — drop it. */
+  .minimap {
+    display: none;
+  }
+  /* Speed reading is the most expendable HUD field on a phone; hide it
+     so the lap/time row stays single-line at 390 px wide. */
+  .hud-top .speed,
+  .hud-top .speed-unit {
+    display: none;
+  }
+}
+
+@media (pointer: coarse) and (orientation: landscape) {
+  /* Landscape: button clusters span ~200 px each on the bottom. Centre the
+     HUD strip between them. */
+  .hud-bar {
+    bottom: max(20px, env(safe-area-inset-bottom));
+    left: 50%;
+    transform: translateX(-50%);
+    width: min(360px, calc(100vw - 440px));
+  }
+  /* Minimap shrinks + moves to the upper-right so the right cluster can
+     have the bottom corner. */
+  .minimap {
+    top: max(90px, calc(env(safe-area-inset-top) + 80px));
+    right: max(12px, env(safe-area-inset-right));
+    bottom: auto;
+    width: 110px;
+    height: 70px;
+  }
+}
+
 .minimap {
   position: absolute;
   bottom: 24px;

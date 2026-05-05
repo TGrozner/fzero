@@ -85,6 +85,49 @@ test('the touch leave button on the race HUD ends the race', async ({ page }) =>
   await expect(page.getByTestId('menu')).toBeVisible();
 });
 
+// Helper: check that two bounding boxes do NOT intersect.
+const intersects = (
+  a: { x: number; y: number; width: number; height: number },
+  b: { x: number; y: number; width: number; height: number },
+): boolean =>
+  a.x < b.x + b.width &&
+  a.x + a.width > b.x &&
+  a.y < b.y + b.height &&
+  a.y + a.height > b.y;
+
+test('on portrait, the HUD bar (power / KO / cooldowns) does NOT overlap any touch cluster', async ({ page }) => {
+  await startRace(page, `mobile-overlap-${Date.now().toString(36)}`);
+  // Wait for actual gameplay so the HUD is fully rendered.
+  await expect(page.getByTestId('touch-controls')).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByTestId('hud')).toBeVisible();
+  const hudBar = await page.locator('.hud-bar').boundingBox();
+  const left = await page.locator('.touch-cluster-left').boundingBox();
+  const right = await page.locator('.touch-cluster-right').boundingBox();
+  expect(hudBar, 'hud-bar must be positioned').toBeTruthy();
+  expect(left, 'left cluster must be positioned').toBeTruthy();
+  expect(right, 'right cluster must be positioned').toBeTruthy();
+  expect(intersects(hudBar!, left!), 'hud-bar must not overlap the left cluster').toBe(false);
+  expect(intersects(hudBar!, right!), 'hud-bar must not overlap the right cluster').toBe(false);
+});
+
+test('on portrait, the top pause/leave row does NOT overlap the lap timer row', async ({ page }) => {
+  await startRace(page, `mobile-toptap-${Date.now().toString(36)}`);
+  await expect(page.getByTestId('touch-pause')).toBeVisible({ timeout: 15_000 });
+  const ui = await page.locator('.touch-ui-row').boundingBox();
+  const top = await page.locator('.hud-top').boundingBox();
+  expect(ui).toBeTruthy();
+  expect(top).toBeTruthy();
+  expect(intersects(ui!, top!), 'touch-ui-row must not overlap hud-top').toBe(false);
+});
+
+test('on portrait, the minimap is hidden so it cannot overlap the right cluster', async ({ page }) => {
+  await startRace(page, `mobile-mini-${Date.now().toString(36)}`);
+  await expect(page.getByTestId('touch-controls')).toBeVisible({ timeout: 15_000 });
+  // The element exists in the DOM but is display:none, so boundingBox is null.
+  const box = await page.locator('.minimap').boundingBox();
+  expect(box).toBeNull();
+});
+
 test('steer + boost are the largest buttons; bumps and utility are still thumb-friendly', async ({ page }) => {
   await startRace(page, `mobile-size-${Date.now().toString(36)}`);
   await expect(page.getByTestId('touch-boost')).toBeVisible({ timeout: 15_000 });
