@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { TRACKS } from '../../shared/track.ts';
 import { SHIP_CLASSES, type ShipClass } from '../../shared/constants.ts';
 import { ALLOWED_LAPS } from '../../shared/roomCore.ts';
@@ -47,6 +47,12 @@ const CLS_FULL: Record<ShipClass, string> = {
   balanced: 'Balanced',
 };
 
+const CLS_TIP: Record<ShipClass, string> = {
+  speed: 'Speed: top speed +14%, slower turns, lighter HP',
+  tank: 'Tank: tightest steering, sturdier walls, lower top speed',
+  balanced: 'Balanced: middle of the road, best for new pilots',
+};
+
 const trackName = (id: string): string =>
   TRACKS.find((t) => t.id === id)?.name ?? id;
 
@@ -92,6 +98,18 @@ export function Lobby({
     for (const p of humans) counts.set(p.trackVote, (counts.get(p.trackVote) ?? 0) + 1);
     return [...counts.entries()].sort((a, b) => b[1] - a[1]);
   }, [humans]);
+
+  // Pulse the "playing X" indicator briefly whenever the active track
+  // changes — visual feedback so a vote flip doesn't slip by unnoticed.
+  const [trackJustChanged, setTrackJustChanged] = useState(false);
+  const prevTrackRef = useRef(trackId);
+  useEffect(() => {
+    if (prevTrackRef.current === trackId) return;
+    prevTrackRef.current = trackId;
+    setTrackJustChanged(true);
+    const t = window.setTimeout(() => setTrackJustChanged(false), 1200);
+    return () => window.clearTimeout(t);
+  }, [trackId]);
 
   useEffect(() => {
     if (!copied) return;
@@ -171,7 +189,19 @@ export function Lobby({
               <span style={{ opacity: 0.7 }}>×{n}</span>
             </span>
           ))}
-          <span style={{ marginLeft: 12, opacity: 0.7 }}>→ playing <strong>{trackName(trackId)}</strong></span>
+          <span
+            data-testid="active-track"
+            style={{
+              marginLeft: 12,
+              opacity: 0.7,
+              transition: 'transform 250ms ease, color 250ms ease',
+              transform: trackJustChanged ? 'scale(1.12)' : 'scale(1)',
+              color: trackJustChanged ? '#3eff8b' : undefined,
+              display: 'inline-block',
+            }}
+          >
+            → playing <strong>{trackName(trackId)}</strong>
+          </span>
         </div>
       )}
 
@@ -187,6 +217,7 @@ export function Lobby({
               onClick={() => onSetClass(c)}
               data-testid={`class-${c}`}
               aria-pressed={me.cls === c}
+              title={CLS_TIP[c]}
               style={{
                 minWidth: 84,
                 background: me.cls === c ? '#1a4a2a' : undefined,
@@ -304,13 +335,19 @@ export function Lobby({
           <button
             onClick={() => onSetReady(!me.ready)}
             data-testid="ready-toggle"
+            title="Race auto-starts when everyone in the lobby is ready"
             style={{ minWidth: 130, background: me.ready ? '#1a4a2a' : undefined }}
           >
             {me.ready ? '✓ Ready' : 'Ready'}
           </button>
         )}
         {isHost && (
-          <button onClick={onStartNow} data-testid="start-now" style={{ minWidth: 110 }}>
+          <button
+            onClick={onStartNow}
+            data-testid="start-now"
+            title="Host only · skip Ready and start the race immediately"
+            style={{ minWidth: 110 }}
+          >
             Start now
           </button>
         )}
