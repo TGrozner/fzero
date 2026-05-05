@@ -31,3 +31,8 @@ jobs:
       - name: Deploy Pages
         if: env.CLOUDFLARE_API_TOKEN != ''
         run: npx wrangler pages deploy dist --project-name=neon-drift --branch=main --commit-dirty=true
+      - name: Smoke test (post-deploy)
+        if: env.CLOUDFLARE_API_TOKEN != '' && vars.VITE_SERVER_URL != ''
+        env:
+          SMOKE_URL: ${{ vars.VITE_SERVER_URL }}
+        run: node scripts/smoke-test.mjs
