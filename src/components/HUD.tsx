@@ -29,7 +29,7 @@ export function HUD({ state }: Props) {
           <span className="total">/{MAX_RACERS}</span>
         </div>
         <div className="lap" data-testid="lap">
-          Lap {ship.l + 1}/3
+          Lap {ship.l + 1}/{state.laps}
         </div>
         <div className="time" data-testid="time">
           {formatTime(time)}

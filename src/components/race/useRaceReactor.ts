@@ -197,7 +197,7 @@ export const useRaceReactor = (state: ClientState): RaceFx => {
             setPbToast((cur) => (cur && cur.id === pbId ? null : cur));
           }, 1800);
         }
-        if (me.l >= 3) {
+        if (me.l >= state.laps) {
           mixer.play('finish', 1);
           if (!lastFinishedRef.current) {
             lastFinishedRef.current = true;

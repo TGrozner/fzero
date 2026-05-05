@@ -20,6 +20,6 @@ export default defineConfig({
         statements: 85,
       },
     },
-    exclude: ['node_modules/**', 'dist/**', 'e2e/**', '.wrangler/**'],
+    exclude: ['node_modules/**', 'dist/**', 'e2e/**', '.wrangler/**', '.claude/**'],
   },
 });
