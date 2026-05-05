@@ -53,11 +53,23 @@ export const SIDE_ATTACK_IMPULSE = 280;
 export const SIDE_ATTACK_DAMAGE = 0.12;
 export const SIDE_ATTACK_COOLDOWN_S = 1.0;
 
-export const WALL_DAMAGE_FACTOR = 0.0025;
-export const OFF_TRACK_DAMAGE_PER_S = 0.18;
+/** Damage from a wall hit, applied as `-vn * factor` where vn is the inbound
+ *  normal velocity. 0.0015 means a top-speed (~280) head-on slam takes ~42 %
+ *  of HP — punishing but survivable, as opposed to the old 0.0025 which
+ *  routinely instakilled. */
+export const WALL_DAMAGE_FACTOR = 0.0015;
+/** Power loss per second while off-track. ~10 s to die from full HP — slow
+ *  enough that cutting a corner isn't a death sentence, fast enough that
+ *  living off-track isn't viable. */
+export const OFF_TRACK_DAMAGE_PER_S = 0.10;
 
 export const BOOST_HP_DRAIN_PER_S = 0.22;
 export const BOOST_SPEED_MULT = 1.6;
+
+/** Passive HP regen per second while on-track, not boosting, not KO'd, not
+ *  in skyway. ~20 s to refill from empty — meaningful recovery without
+ *  trivialising attacks. */
+export const POWER_REGEN_PER_S = 0.05;
 
 /** Room phase strings. */
 export type RoomPhase = 'WAITING' | 'COUNTDOWN' | 'RACING' | 'FINISHED';

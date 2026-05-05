@@ -16,6 +16,7 @@ import {
   BOOST_SPEED_MULT,
   DEFAULT_SHIP_CLASS,
   OFF_TRACK_DAMAGE_PER_S,
+  POWER_REGEN_PER_S,
   type ShipClass,
   SKYWAY_SPEED_BONUS,
   WALL_DAMAGE_FACTOR,
@@ -261,6 +262,12 @@ export const stepVehicle = (
     power -= OFF_TRACK_DAMAGE_PER_S * dt;
   }
   power -= wallDamage;
+  // Passive regen: clean driving (on-track, no boost, not skywaying, not
+  // already KO'd) slowly refills HP. Lets players recover from a bump or
+  // corner clip instead of attriting toward inevitable death.
+  if (onTrack && !wantsBoost && !skywayActive && power > 0) {
+    power += POWER_REGEN_PER_S * dt;
+  }
   power = clamp(power, 0, 1);
 
   const ko = power <= 0;

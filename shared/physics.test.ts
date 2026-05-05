@@ -102,6 +102,45 @@ describe('stepVehicle', () => {
     expect(after.power).toBeLessThan(v.power);
   });
 
+  it('regenerates power when driving cleanly on track', () => {
+    let v = { ...createVehicle('p', arena.startPosition, arenaHeading), power: 0.5 };
+    // 1 second of clean coasting on track, no boost.
+    for (let i = 0; i < 60; i++) {
+      v = stepVehicle(v, { ...NEUTRAL_INPUT, throttle: 0.5 }, arena, 1 / 60, i / 60);
+    }
+    expect(v.power).toBeGreaterThan(0.5);
+    // Sanity: regen is slow, not instant — shouldn't overshoot dramatically.
+    expect(v.power).toBeLessThan(0.8);
+  });
+
+  it('does NOT regen while boosting', () => {
+    let v = { ...createVehicle('p', arena.startPosition, arenaHeading), power: 0.5 };
+    for (let i = 0; i < 60; i++) {
+      v = stepVehicle(v, { ...NEUTRAL_INPUT, throttle: 1, boost: true }, arena, 1 / 60, i / 60);
+    }
+    // Boost drains, no regen offset → power must drop.
+    expect(v.power).toBeLessThan(0.5);
+  });
+
+  it('does NOT regen while off-track', () => {
+    let v = { ...createVehicle('p', v2(10000, 10000), 0), power: 0.5 };
+    for (let i = 0; i < 60; i++) {
+      v = stepVehicle(v, { ...NEUTRAL_INPUT, throttle: 0.5 }, track, 1 / 60, i / 60);
+    }
+    expect(v.power).toBeLessThan(0.5);
+  });
+
+  it('regen caps at full HP and does not overshoot 1', () => {
+    // Idle on the start grid (NEUTRAL_INPUT keeps the ship still — no risk
+    // of drifting off-track over the long simulation).
+    let v = { ...createVehicle('p', arena.startPosition, arenaHeading), power: 0.99 };
+    for (let i = 0; i < 600; i++) {
+      v = stepVehicle(v, NEUTRAL_INPUT, arena, 1 / 60, i / 60);
+    }
+    expect(v.power).toBeLessThanOrEqual(1);
+    expect(v.power).toBe(1);
+  });
+
   it('KO vehicle does not respond to input', () => {
     const v = { ...createVehicle('p', track.startPosition, 0), power: 0, ko: true };
     const after = stepVehicle(v, { ...NEUTRAL_INPUT, throttle: 1 }, track, 0.5, 0);
