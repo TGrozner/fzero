@@ -7,6 +7,38 @@ adheres loosely to [SemVer](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **Multiplayer lobby coherence pass.** Single source of authority for global
+  decisions, fair process for shared ones:
+  - **Host model.** Longest-connected human is the host (★). Auto-transfers
+    when they leave. Only the host can change the lap count or trigger
+    Start Now; non-host attempts are silently ignored both client-side
+    (button hidden / select disabled) and server-side (defense in depth).
+  - **Track voting.** `set_track` records a vote; the active track follows
+    the majority. Ties keep the current track. The lobby shows the live
+    tally and per-player vote.
+  - **Configurable lap count** — 1 / 2 / 3 / 5, host-controlled.
+  - **Per-player ship-class switcher** in the lobby.
+  - **Per-player ping** — RTT shows next to each name in green / yellow / red
+    bands. Lobby pings every 30 s to keep readings fresh.
+  - **Spectator mode.** `?spectator=1` joins a room mid-race as an observer
+    (no vehicle, full snapshots). Auto-promoted to a player when the next
+    race starts. Pre-flight `/status` makes the client switch to spectator
+    silently when the room is busy instead of throwing a 409.
+  - **Auto-rejoin between races.** At the FINISHED → WAITING cooldown the
+    server re-promotes every still-connected socket (players + spectators)
+    with a fresh personalized welcome — no disconnect / reconnect dance.
+- **Career stats** persisted in localStorage: races, wins (+win rate),
+  podiums, KOs, deaths. Shown on the menu under the per-track PB row.
+- **In-race name labels** for human players (skipped for bots so the screen
+  stays readable on a 99-grid).
+- `/status` Worker endpoint returning `{phase, humans, maxPlayers, trackId,
+  laps}` so clients can pre-flight a room before attempting an upgrade.
+- `scripts/multi-client-test.mjs` — 6 fast multi-client integration cases
+  against the live worker, plus 2 long-running auto-rejoin cases behind
+  `FULL=1`.
+- Daily `cf-usage.yml` GitHub Actions workflow that queries the Cloudflare
+  GraphQL Analytics API and opens an issue when consumption exceeds 80 % of
+  the Workers free tier.
 - `prefers-reduced-motion` support across HUD effects, screen shake, and
   damage vignette.
 - Audio suspends when the tab is hidden (saves CPU on backgrounded sessions).
@@ -20,13 +52,32 @@ adheres loosely to [SemVer](https://semver.org/).
 - `.env.example` documenting `VITE_SERVER_URL`.
 
 ### Changed
-- Production sourcemaps are now `hidden` (no `//# sourceMappingURL=` reference
-  in shipped bundles) to avoid exposing source code in devtools.
+- **Lobby auto-start removed.** The 20 s / 12 s timer that fired regardless
+  of whether anyone wanted to play is gone. Players control the launch via
+  the per-player Ready toggle (race auto-starts when everyone's ticked) or
+  the host's Start Now override.
+- **Server tick rate dropped from 10 Hz to 5 Hz** (and client input rate
+  matched) to stay under the Cloudflare Workers free tier (100 k req / day
+  total). `INTERP_DELAY_MS` bumped from 80 ms to 200 ms (one full tick) so
+  the client always has a "next" snapshot to lerp toward; the visual hit is
+  ~120 ms of extra remote-ship latency, masked by interpolation.
+- Outer Worker → Durable Object subfetch now forwards every query param
+  except `?room=` (was stripping `?session=` and `?spectator=`, which
+  broke reconnection and made spectator mode unreachable).
+- Production sourcemaps disabled (`sourcemap: false`) — `'hidden'` still
+  uploaded the `.map` files to Pages where they were publicly fetchable.
 - Vendor split: `react`/`react-dom` extracted into a separate chunk.
 - `wrangler.toml` no longer hardcodes an account id; configure via the
   `CLOUDFLARE_ACCOUNT_ID` env var instead.
-- `scripts/smoke-test.mjs` requires `SMOKE_URL` and no longer hardcodes a
-  personal subdomain.
+- `scripts/smoke-test.mjs` requires `SMOKE_URL`, uses Node 22+ native
+  `WebSocket`, hits a dedicated `?room=smoke` so it never collides with
+  real player traffic, and skips `fast=1` so it doesn't trigger a full
+  ~1900-DO-request race per CI run (now ~5 DO requests per run).
+
+### Fixed
+- Sourcemaps were being served from Pages even with `sourcemap: 'hidden'`
+  — anyone who knew the bundle hash could fetch `<bundle>.map` and read
+  source. Now disabled outright in production builds.
 
 ## [0.1.0] - 2026-05-05
 

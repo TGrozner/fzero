@@ -1,0 +1,73 @@
+name: Cloudflare usage check
+
+# Runs daily and opens a GitHub issue if the past 24 h of Workers + Durable
+# Object request volume crosses 80 % of the free tier (100 k req/day total).
+# Idempotent: if an open `cf-usage` issue already exists, a comment is added
+# rather than a duplicate issue.
+
+on:
+  schedule:
+    - cron: '17 9 * * *' # 09:17 UTC daily
+  workflow_dispatch: # let humans trigger it on demand for dry runs
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    if: github.repository == 'TGrozner/neon-drift'
+    permissions:
+      issues: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Query Cloudflare Analytics
+        id: usage
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          THRESHOLD_PERCENT: '80'
+        run: |
+          set -euo pipefail
+          node scripts/cf-usage-check.mjs > usage.json
+          {
+            echo 'usage<<USAGE_EOF'
+            cat usage.json
+            echo USAGE_EOF
+          } >> "$GITHUB_OUTPUT"
+          echo 'alert='$(node -e "console.log(JSON.parse(require('fs').readFileSync('usage.json','utf8')).alert)") >> "$GITHUB_OUTPUT"
+          echo 'percent='$(node -e "console.log(JSON.parse(require('fs').readFileSync('usage.json','utf8')).percent)") >> "$GITHUB_OUTPUT"
+      - name: Print summary
+        run: |
+          echo "## Cloudflare usage" >> "$GITHUB_STEP_SUMMARY"
+          echo '```json' >> "$GITHUB_STEP_SUMMARY"
+          cat usage.json >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+      - name: Find existing alert issue
+        if: steps.usage.outputs.alert == 'true'
+        id: existing
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          number=$(gh issue list --state open --label cf-usage --json number --jq '.[0].number // ""')
+          echo "number=$number" >> "$GITHUB_OUTPUT"
+      - name: Open or comment on alert issue
+        if: steps.usage.outputs.alert == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          USAGE: ${{ steps.usage.outputs.usage }}
+          PERCENT: ${{ steps.usage.outputs.percent }}
+          EXISTING: ${{ steps.existing.outputs.number }}
+        run: |
+          set -euo pipefail
+          BODY=$(printf '⚠️ Cloudflare consumption is at **%s %%** of the daily Workers free tier.\n\n```json\n%s\n```\n\nSee `scripts/cf-usage-check.mjs` for the query and `.github/workflows/cf-usage.yml` for the cron.' "$PERCENT" "$USAGE")
+          if [ -z "$EXISTING" ]; then
+            echo "$BODY" | gh issue create \
+              --title "Cloudflare usage at ${PERCENT}% of daily free tier" \
+              --label cf-usage \
+              --body-file -
+          else
+            echo "$BODY" | gh issue comment "$EXISTING" --body-file -
+          fi

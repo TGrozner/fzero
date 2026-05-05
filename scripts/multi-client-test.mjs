@@ -233,4 +233,99 @@ await runCase('spectator joins mid-race without 409', async () => {
   b.close();
 });
 
-console.log('\nAll multi-client tests passed.');
+// The two long-running cases below verify the FINISHED → WAITING auto-rejoin
+// pipeline. They take ~75 s each because the server's NO_INPUT_ABANDON_S is
+// 60 s + 8 s FINISHED cooldown + a few seconds of race lifecycle. Skipped by
+// default to keep CI fast; opt in with FULL=1 when shipping a release.
+const FULL = process.env.FULL === '1';
+
+if (FULL) {
+  await runCase('connected players auto-rejoin a fresh lobby after a race', async () => {
+    const room = `mc-rejoin-${Date.now().toString(36)}`;
+    // A must arrive at the server first so its hello is processed first and it
+    // becomes host. Don't open B until A's welcome lands or the host role can
+    // race to whichever hello the server happens to read first.
+    const a = new Client('A', room);
+    await a.waitFor(() => a.id);
+    const b = new Client('B', room);
+    await b.waitFor(() => b.id);
+    const oldAId = a.id;
+    const oldBId = b.id;
+    a.send({ type: 'start_now' });
+    if (!(await a.waitFor(() => a.phase === 'RACING', 8000, 'A racing'))) {
+      throw new Error(`A never reached RACING; last phase=${a.phase}`);
+    }
+    // Stay silent. The race auto-abandons after NO_INPUT_ABANDON_S = 60 s,
+    // then the 8 s FINISHED cooldown elapses and the server sends each
+    // still-connected socket a fresh welcome with phase=WAITING.
+    console.log('   waiting up to 80s for race + cooldown...');
+    let promotedAId = null;
+    let promotedBId = null;
+    a.events.length = 0; b.events.length = 0;
+    if (
+      !(await a.waitFor(() => {
+        const w = a.events.find((e) => e.type === 'welcome' && e.phase === 'WAITING');
+        if (w) { promotedAId = w.yourId; return true; }
+        return false;
+      }, 80_000, 'A auto-promote welcome'))
+    ) {
+      throw new Error(`A never received an auto-rejoin welcome; phase=${a.phase}`);
+    }
+    if (
+      !(await b.waitFor(() => {
+        const w = b.events.find((e) => e.type === 'welcome' && e.phase === 'WAITING');
+        if (w) { promotedBId = w.yourId; return true; }
+        return false;
+      }, 5000, 'B auto-promote welcome'))
+    ) {
+      throw new Error(`B never received an auto-rejoin welcome`);
+    }
+    if (!promotedAId || promotedAId === oldAId) {
+      throw new Error(`A's promoted id should be fresh; old=${oldAId} new=${promotedAId}`);
+    }
+    if (!promotedBId || promotedBId === oldBId) {
+      throw new Error(`B's promoted id should be fresh; old=${oldBId} new=${promotedBId}`);
+    }
+    if (a.spectator) throw new Error(`A still flagged as spectator after promotion`);
+    if (b.spectator) throw new Error(`B still flagged as spectator after promotion`);
+    a.close();
+    b.close();
+  });
+
+  await runCase('spectator is promoted to player on the next race', async () => {
+    const room = `mc-spec-promo-${Date.now().toString(36)}`;
+    const a = new Client('A', room);
+    await a.waitFor(() => a.id);
+    a.send({ type: 'start_now' });
+    if (!(await a.waitFor(() => a.phase === 'RACING', 8000, 'A racing'))) {
+      throw new Error(`A never reached RACING; last phase=${a.phase}`);
+    }
+    // C joins as spectator mid-race.
+    const c = new Client('C', room, { spectator: true });
+    if (!(await c.waitFor(() => c.spectator === true, 4000, 'C spectator welcome'))) {
+      throw new Error(`C never received a spectator welcome`);
+    }
+    if (c.id !== null) throw new Error(`C spectator should have null id, got ${c.id}`);
+    // Wait for the race to abandon + cooldown + auto-rejoin.
+    console.log('   waiting up to 80s for race + cooldown + spec promotion...');
+    let promotedCId = null;
+    c.events.length = 0;
+    if (
+      !(await c.waitFor(() => {
+        const w = c.events.find(
+          (e) => e.type === 'welcome' && e.phase === 'WAITING' && e.spectator !== true,
+        );
+        if (w) { promotedCId = w.yourId; return true; }
+        return false;
+      }, 80_000, 'C promotion welcome'))
+    ) {
+      throw new Error(`C never got promoted; spectator=${c.spectator}, last phase=${c.phase}`);
+    }
+    if (!promotedCId) throw new Error(`C promoted welcome had no yourId`);
+    if (c.spectator) throw new Error(`C still flagged as spectator after promotion`);
+    a.close();
+    c.close();
+  });
+}
+
+console.log('\nAll multi-client tests passed.' + (FULL ? '' : ' (Re-run with FULL=1 for the long-running auto-rejoin cases.)'));

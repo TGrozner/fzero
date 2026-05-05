@@ -7,26 +7,47 @@ A 99-player synthwave anti-grav battle-royale racer, built end-to-end with React
 
 > Top-down anti-grav racing. Real-time WebSocket multiplayer. Bots fill empty seats so it's always 99 racers on the grid.
 
-> **Play live:** _link added once the Pages project is configured — see [Deployment](#deployment)._
+> **Play live:** https://neon-drift-31d.pages.dev
 
 ## Features
 
+### Racing
 - **99 simultaneous racers** on the same track. Humans + AI bots fill remaining slots.
 - **Power Meter**: shared HP / boost gauge — boost costs HP, off-track erodes HP, walls hurt. HP=0 = KO.
 - **Spin attack** (Enter) — bumps and damages nearby ships.
 - **Side attacks** (Q/E) — lateral burst that knocks rivals away.
-- **Skyway** (Space) — once the KO Meter is full, fly above the track for 5s, immune to collisions.
-- **Last-20 boost** — when racers drop below 20, every survivor gets a free 3s boost.
+- **Skyway** (Space) — once the KO Meter is full, fly above the track for 5 s, immune to collisions.
+- **Last-20 boost** — when racers drop below 20, every survivor gets a free 3 s boost.
 - **3 tracks** — `Mute Avenue` (oval), `Big Blue` (peanut), and `Port Town` (chicane).
-- **3 ship classes** — Speed (top speed), Tank (steering + restitution), Balanced.
+- **3 ship classes** — Speed, Tank, Balanced. Switchable per-player from the lobby.
+- **Configurable lap count** — 1 / 2 / 3 / 5, picked by the host before the race.
 - **Perfect start** — full throttle on GO grants a free 1.5 s boost.
 - **Pickups** — boost pads, heal plates, and mines, respawning every 5 s.
 - **Death cam** — when you're KO'd, the camera locks onto whoever did it for ~1.5 s.
-- **Spectator mode** — after your KO, the camera follows the leader so you can watch the rest of the race play out.
+- **Live spectator** — after your KO the camera follows the leader so you can watch the rest of the race.
+- **In-race name labels** — human player names float above their ships so you can spot your friends in the pack (bots are unlabeled to keep the screen readable).
+
+### Multiplayer lobby
+- **Host model** — the longest-connected human is the host. Auto-transfers when the host leaves.
+  Only the host can change the lap count or trigger Start Now.
+- **Track voting** — every player votes for a track from the dropdown; the active track follows the
+  majority. Ties keep the current track. The lobby shows the live tally and the winning track.
+- **Per-player ready** — race auto-starts as soon as every human ticks Ready.
+- **Start Now** — the host can override Ready to launch the race immediately.
+- **Spectator mode** — joining a room while a race is in progress drops you into the action as an
+  observer (no vehicle, full snapshots). You're auto-promoted to a player when the next race starts.
+- **Auto-rejoin** — at the end of every race, all still-connected sockets are re-promoted into the
+  fresh lobby without disconnect / reconnect. Friend groups can chain matches without churn.
+- **Per-player ping** — each pilot's RTT shows next to their name in the lobby (green / yellow / red).
+- **Career stats** — races, wins, podiums, KOs, deaths persisted in localStorage and shown on the menu.
 - **Personal bests** — best lap + best race per track, persisted locally.
+- **Invite link** — one-click copy of a `?room=…` URL so friends land in the same room.
 - **Mobile-ready** — touch joystick + action buttons on phones / tablets.
-- Real-time **server-authoritative** simulation @ 30 Hz, snapshots @ 20 Hz, with client interpolation.
-- Lobby with auto-start: 25s after the first pilot joins, shortened to 12s when a 2nd shows up.
+
+### Net
+- Server-authoritative simulation at **5 Hz** (one tick = one Durable Object alarm). Client
+  interpolates between snapshots so the lower rate is invisible at the wheel — the rate is tuned
+  to keep the project under the Cloudflare Workers free tier (see below).
 
 ## Stack
 
@@ -54,6 +75,19 @@ A 99-player synthwave anti-grav battle-royale racer, built end-to-end with React
 
 On phones / tablets: a left-side joystick steers and accelerates, right-side buttons map to boost / spin / side / Skyway.
 
+### Lobby flow
+
+1. Pick a pseudo, color, and ship class on the menu, optionally set a `room` to private-match with friends.
+2. **Race** lands you in the lobby. The first pilot to join is the host (★).
+3. Vote for a track from the dropdown — the active track always follows the majority vote.
+4. Click **Ready**. When everyone's ticked, the race starts after a 3-second countdown.
+5. Host-only buttons:
+   - **Start now** — launch the race immediately, ignoring Ready flags.
+   - **Laps** — 1 / 2 / 3 / 5 (changing the lap count clears everyone's Ready).
+6. After a race ends, the cooldown auto-rolls everyone back into the lobby for the next match.
+7. Joining a room mid-race lands you in **spectator** mode — you watch the race in real time and
+   are auto-promoted to a player when the lobby reopens.
+
 ## Accessibility
 
 - Respects `prefers-reduced-motion`: screen shake, vignette pulse and trail flicker are disabled when the OS asks for less motion.
@@ -71,7 +105,7 @@ npm run dev          # starts vite (5173) + wrangler dev (8787) in parallel
 
 Open http://localhost:5173.
 
-> Tip: append `?fast=1` (e.g. http://localhost:5173/?fast=1) to shorten the lobby auto-start timer to 2 s — handy when racing solo against bots.
+> Tip: append `?fast=1` (e.g. http://localhost:5173/?fast=1) to arm a 2 s auto-start timer instead of using the Ready / Start Now flow — handy for e2e tests and solo bot racing.
 
 ## Scripts
 
@@ -126,7 +160,7 @@ e2e/           # Playwright tests
                                                       ▼
                                           ┌──────────────────────┐
                                           │ RoomCore (pure TS)   │
-                                          │  - 30 Hz simulation  │
+                                          │  - 5 Hz simulation   │
                                           │  - 99 vehicles       │
                                           │  - bot AI in-loop    │
                                           └──────────────────────┘
@@ -156,14 +190,43 @@ Option 1 is the cheapest (one less hop, no Pages Function invocations). Option 2
 
 ### Cloudflare free tier
 
-Designed to run cleanly on the Workers free tier (100k req/day, 1M Durable Object invocations/month). Built-in protections:
+Designed to run cleanly on the Workers free tier (100 k requests / day total — covers Worker
+invocations + Durable Object requests + Pages Functions). Built-in protections:
 
-- Rooms hibernate when empty — Durable Object alarms stop scheduling once the last player leaves.
-- Per-socket input rate limit (60 msg/s) prevents a misbehaving client from inflating DO request counts.
-- Single 30 Hz simulation tick produces snapshots at 20 Hz; client interpolation hides the gap.
-- Concurrent room cap (`MAX_ROOMS` constant) protects against a single attacker spawning many DO instances by repeatedly changing `?room=`.
+- **5 Hz simulation tick** — the dominant cost driver. Each alarm fire is one DO request; client
+  interpolation (200 ms render delay) hides the lower rate. See `SERVER_TICK_HZ` in
+  [shared/constants.ts](shared/constants.ts).
+- **5 Hz client input throttle** — inputs are aligned with the tick rate; a misbehaving client gets
+  closed by the per-socket rate limiter (`WS_INPUT_RATE_LIMIT_PER_S` = 30, ~6× headroom).
+- **1 Hz alarm in WAITING** — lobbies bleed `startsIn` once a second instead of 5×.
+- **Empty-room hibernation** — Durable Object alarms stop scheduling once the last player leaves
+  AND the room is back in WAITING.
+- **Sanitized room names** — `?room=` is alphanumeric + dash + underscore, ≤ 32 chars, so a hostile
+  client can't spawn a thousand DOs by varying the param.
+- **Auto-abandon** — the race ends as soon as the last human disconnects, freeing the DO for the
+  next lobby instead of letting the simulation run to completion against a wall of bots.
+- **No sourcemaps in prod** — `sourcemap: false` in [vite.config.ts](vite.config.ts) keeps the JS
+  bundles minified-only on Pages.
 
-If your free tier still drains too fast, raise `SERVER_TICK_MS` in `shared/constants.ts` (e.g. from 33 to 50) — the client interpolates so the visual hit is small.
+A daily GitHub Actions cron (`.github/workflows/cf-usage.yml`) queries the Cloudflare GraphQL
+Analytics API and opens an issue if the past 24 h consumption crosses 80 % of the free tier — set
+the `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` repo secrets and the token must include the
+"Account Analytics: Read" permission.
+
+If your free tier still drains too fast, lower `SERVER_TICK_HZ` further in `shared/constants.ts`
+and bump `INTERP_DELAY_MS` in `src/render/renderer.ts` to match (one full tick interval). The
+visual hit at 3 Hz is just barely perceptible at 60 fps render; below that, ships start looking
+"jumpy" near the camera.
+
+## Tests
+
+```bash
+npm test                 # unit tests (vitest)
+npm run e2e              # Playwright e2e against a local wrangler dev + preview server
+SMOKE_URL=wss://… node scripts/smoke-test.mjs           # ~5 DO req prod liveness check
+SMOKE_URL=wss://… node scripts/multi-client-test.mjs    # 6 multi-client coherence cases against prod
+FULL=1 SMOKE_URL=… node scripts/multi-client-test.mjs   # +2 long-running auto-rejoin cases (~80 s each)
+```
 
 ## License
 
