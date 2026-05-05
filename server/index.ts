@@ -242,7 +242,9 @@ export class Room {
     // of 10× to keep DO request counts low on the free tier. step() is safe with
     // larger dt during WAITING — it just decrements `startsIn` linearly.
     const waitingDt = this.lastTickMs === 0 ? 1 : Math.min(2, (now - this.lastTickMs) / 1000);
-    const racingDt = this.lastTickMs === 0 ? 1 / 30 : Math.min(0.1, (now - this.lastTickMs) / 1000);
+    // dt cap = 2× nominal tick so a missed alarm doesn't tunnel physics, but
+    // keep enough headroom for the 5 Hz nominal cadence (200 ms).
+    const racingDt = this.lastTickMs === 0 ? 1 / 30 : Math.min(0.4, (now - this.lastTickMs) / 1000);
     const dt = this.core.phase === 'WAITING' ? waitingDt : racingDt;
     this.lastTickMs = now;
     const out = this.core.step(dt);

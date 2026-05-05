@@ -7,8 +7,11 @@ export const VEHICLE_RADIUS = 5;
 /** Number of laps in a race. */
 export const TOTAL_LAPS = 3;
 
-/** Server simulation tick rate (alarm fires this often + snapshot is broadcast). */
-export const SERVER_TICK_HZ = 10;
+/** Server simulation tick rate (alarm fires this often + snapshot is broadcast).
+ *  5 Hz: each alarm fire is one DO request, so tick rate is the dominant cost
+ *  driver on the Cloudflare free tier. The client interpolates between
+ *  snapshots so the lower rate is invisible to players. */
+export const SERVER_TICK_HZ = 5;
 export const SERVER_TICK_MS = 1000 / SERVER_TICK_HZ;
 
 /** Snapshot broadcast rate — aligned with the alarm tick so we emit one per fire. */
