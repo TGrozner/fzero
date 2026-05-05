@@ -196,9 +196,7 @@ export const encodeInput = (input: {
   };
 };
 
-export const decodeInput = (
-  bits: InputBits,
-): {
+export type DecodedInput = {
   throttle: number;
   steer: number;
   boost: boolean;
@@ -206,15 +204,32 @@ export const decodeInput = (
   sideLeft: boolean;
   sideRight: boolean;
   skyway: boolean;
-} => ({
-  throttle: bits.th / 100,
-  steer: bits.st / 100,
-  boost: (bits.b & IBIT_BOOST) !== 0,
-  spin: (bits.b & IBIT_SPIN) !== 0,
-  sideLeft: (bits.b & IBIT_SIDE_LEFT) !== 0,
-  sideRight: (bits.b & IBIT_SIDE_RIGHT) !== 0,
-  skyway: (bits.b & IBIT_SKYWAY) !== 0,
-});
+};
+
+const finiteNumber = (v: unknown): number =>
+  typeof v === 'number' && Number.isFinite(v) ? v : 0;
+
+const clamp1 = (v: number): number => (v > 1 ? 1 : v < -1 ? -1 : v);
+
+/**
+ * Defensive decode: `bits` is whatever a client sent, not necessarily a
+ * well-formed `InputBits`. We validate types, clamp throttle/steer to the
+ * declared range, and coerce flags to a finite integer so downstream physics
+ * code can never see NaN.
+ */
+export const decodeInput = (bits: unknown): DecodedInput => {
+  const b = (bits ?? {}) as { th?: unknown; st?: unknown; b?: unknown };
+  const flags = finiteNumber(b.b) | 0;
+  return {
+    throttle: clamp1(finiteNumber(b.th) / 100),
+    steer: clamp1(finiteNumber(b.st) / 100),
+    boost: (flags & IBIT_BOOST) !== 0,
+    spin: (flags & IBIT_SPIN) !== 0,
+    sideLeft: (flags & IBIT_SIDE_LEFT) !== 0,
+    sideRight: (flags & IBIT_SIDE_RIGHT) !== 0,
+    skyway: (flags & IBIT_SKYWAY) !== 0,
+  };
+};
 
 /** Reconstruct a Vec2 position from a snapshot. */
 export const snapshotPos = (s: ShipSnapshot): Vec2 => ({ x: s.x, y: s.y });

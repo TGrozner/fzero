@@ -1,6 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { TRACKS } from '../../shared/track.ts';
-import { SHIP_CLASSES, type ShipClass } from '../../shared/constants.ts';
+import {
+  RTT_BAND_GREEN_MAX,
+  RTT_BAND_YELLOW_MAX,
+  SHIP_CLASSES,
+  type ShipClass,
+} from '../../shared/constants.ts';
 import { ALLOWED_LAPS } from '../../shared/roomCore.ts';
 import { getMixer } from '../audio/mixer.ts';
 
@@ -17,8 +22,8 @@ type Player = {
 
 const pingColor = (rtt: number | null): string => {
   if (rtt === null) return '#666';
-  if (rtt < 80) return '#3eff8b';
-  if (rtt < 180) return '#ffd23a';
+  if (rtt < RTT_BAND_GREEN_MAX) return '#3eff8b';
+  if (rtt < RTT_BAND_YELLOW_MAX) return '#ffd23a';
   return '#ff4040';
 };
 

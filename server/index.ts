@@ -244,6 +244,21 @@ export class Room {
       return;
     }
     if (msg.type === 'hello') {
+      // ClientMessage typings say string, but a hand-crafted message could
+      // pass anything. Reject malformed hellos up front rather than letting
+      // sanitizeName(42) throw deep inside RoomCore.
+      if (typeof msg.name !== 'string' || typeof msg.color !== 'string') {
+        this.closeWith(ws, WS_CLOSE_PROTOCOL_ERROR, 'bad hello');
+        return;
+      }
+      if (msg.cls !== undefined && typeof msg.cls !== 'string') {
+        this.closeWith(ws, WS_CLOSE_PROTOCOL_ERROR, 'bad hello');
+        return;
+      }
+      if (msg.session !== undefined && typeof msg.session !== 'string') {
+        this.closeWith(ws, WS_CLOSE_PROTOCOL_ERROR, 'bad hello');
+        return;
+      }
       const cls: ShipClass = msg.cls ?? DEFAULT_SHIP_CLASS;
       // Persist the hello on the attachment so the FINISHED → WAITING
       // auto-promotion knows how to re-add this socket as a player on the
@@ -389,25 +404,40 @@ export class Room {
   }
 
   webSocketClose(ws: WebSocket, _code: number, _reason: string, _wasClean: boolean): void {
-    const att = ws.deserializeAttachment() as ConnAttachment | null;
-    if (att?.connId) this.core.removeHuman(att.connId);
-    this.broadcast({ type: 'players', players: this.core.playerInfos() });
+    this.handleDisconnect(ws);
   }
 
   webSocketError(ws: WebSocket, _err: unknown): void {
+    this.handleDisconnect(ws);
+  }
+
+  /**
+   * Both close and error funnel through here: only broadcast a refreshed
+   * player list when the connection actually corresponded to a known player.
+   * Without this guard, errored sockets that never finished the hello (or
+   * the second of a close+error pair) would still trigger an empty broadcast.
+   */
+  private handleDisconnect(ws: WebSocket): void {
     const att = ws.deserializeAttachment() as ConnAttachment | null;
-    if (att?.connId) this.core.removeHuman(att.connId);
+    if (!att?.connId) return;
+    const changed = this.core.removeHuman(att.connId);
+    if (changed) {
+      this.broadcast({ type: 'players', players: this.core.playerInfos() });
+    }
   }
 
   async alarm(): Promise<void> {
     const now = Date.now();
-    // While WAITING we only need to bleed `startsIn`; tick once a second instead
-    // of 10× to keep DO request counts low on the free tier. step() is safe with
-    // larger dt during WAITING — it just decrements `startsIn` linearly.
-    const waitingDt = this.lastTickMs === 0 ? 1 : Math.min(2, (now - this.lastTickMs) / 1000);
-    // dt cap = 2× nominal tick so a missed alarm doesn't tunnel physics.
-    const racingDt = this.lastTickMs === 0 ? 1 / 30 : Math.min(0.2, (now - this.lastTickMs) / 1000);
-    const dt = this.core.phase === 'WAITING' ? waitingDt : racingDt;
+    // WAITING and FINISHED are slow phases: nothing in step() needs 10 Hz
+    // resolution there (we just bleed a countdown). Run them at 1 Hz to keep
+    // DO request counts low on the free tier — an 8 s FINISHED cooldown at
+    // 10 Hz costs 80 alarms per race for nothing. dt cap is 2 s for slow
+    // phases (catches up after a missed tick), 0.2 s in COUNTDOWN/RACING so
+    // a hiccup can't tunnel physics through walls.
+    const slow = this.core.phase === 'WAITING' || this.core.phase === 'FINISHED';
+    const dt = this.lastTickMs === 0
+      ? (slow ? 1 : 1 / 30)
+      : Math.min(slow ? 2 : 0.2, (now - this.lastTickMs) / 1000);
     this.lastTickMs = now;
     const phaseBefore = this.core.phase;
     const out = this.core.step(dt);
@@ -423,7 +453,8 @@ export class Room {
     const sockets = this.state.getWebSockets();
     const empty = sockets.length === 0 && this.core.phase === 'WAITING';
     if (!empty) {
-      const nextMs = this.core.phase === 'WAITING' ? 1000 : SERVER_TICK_MS;
+      const slowAfter = this.core.phase === 'WAITING' || this.core.phase === 'FINISHED';
+      const nextMs = slowAfter ? 1000 : SERVER_TICK_MS;
       await this.state.storage.setAlarm(now + nextMs);
     }
   }

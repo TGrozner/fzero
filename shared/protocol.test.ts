@@ -78,6 +78,43 @@ describe('encodeInput / decodeInput', () => {
     expect(out.throttle).toBe(1);
     expect(out.steer).toBe(-1);
   });
+
+  it('produces neutral input from non-object bits', () => {
+    const expected = {
+      throttle: 0,
+      steer: 0,
+      boost: false,
+      spin: false,
+      sideLeft: false,
+      sideRight: false,
+      skyway: false,
+    };
+    expect(decodeInput(null)).toEqual(expected);
+    expect(decodeInput(undefined)).toEqual(expected);
+    expect(decodeInput('lol' as unknown)).toEqual(expected);
+    expect(decodeInput(42 as unknown)).toEqual(expected);
+  });
+
+  it('rejects NaN / non-finite fields without producing NaN', () => {
+    const out = decodeInput({ th: NaN, st: Infinity, b: -Infinity });
+    expect(Number.isFinite(out.throttle)).toBe(true);
+    expect(Number.isFinite(out.steer)).toBe(true);
+    expect(out.throttle).toBe(0);
+    expect(out.steer).toBe(0);
+    expect(out.boost).toBe(false);
+  });
+
+  it('clamps direct out-of-range InputBits (not just via encodeInput)', () => {
+    const out = decodeInput({ th: 9999, st: -9999, b: 0 });
+    expect(out.throttle).toBe(1);
+    expect(out.steer).toBe(-1);
+  });
+
+  it('coerces non-integer flag bits without breaking', () => {
+    const out = decodeInput({ th: 0, st: 0, b: 'boom' });
+    expect(out.boost).toBe(false);
+    expect(out.spin).toBe(false);
+  });
 });
 
 describe('flag constants are distinct', () => {

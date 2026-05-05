@@ -7,6 +7,8 @@ import {
   NO_INPUT_ABANDON_S,
   PERFECT_START_BOOST_S,
   type RoomPhase,
+  RTT_BAND_GREEN_MAX,
+  RTT_BAND_YELLOW_MAX,
   SERVER_SNAPSHOT_MS,
   SHIP_CLASSES,
   SHIP_COLORS,
@@ -248,12 +250,16 @@ export class RoomCore {
     };
   }
 
-  /** Remove a player by their connection id. */
-  removeHuman(connId: string): void {
+  /**
+   * Remove a player by their connection id. Returns true if a player was
+   * actually affected (so the DO can decide whether to broadcast). Repeated
+   * calls for the same connId after the first are no-ops.
+   */
+  removeHuman(connId: string): boolean {
     const pid = this.connToPlayer.get(connId);
-    if (pid === undefined) return;
+    if (pid === undefined) return false;
     const entry = this.players.get(pid);
-    if (!entry) return;
+    if (!entry) return false;
     this.connToPlayer.delete(connId);
     if (this.phase === 'WAITING') {
       // Drop fully if not yet racing.
@@ -268,6 +274,7 @@ export class RoomCore {
     }
     const humans = [...this.players.values()].filter((p) => !p.bot).length;
     if (humans === 0) this.startsIn = -1;
+    return true;
   }
 
   /** Apply input from a connection id to the corresponding player. */
@@ -579,16 +586,24 @@ export class RoomCore {
     return tied ? this.track.id : winner;
   }
 
-  /** Update a player's reported RTT. No-op if rtt change is below 10 ms. */
+  /**
+   * Update a player's reported RTT. The stored value always refreshes (so a
+   * later reconnect or display read gets the latest number), but the return
+   * value — which the DO uses to decide whether to broadcast a `players`
+   * frame — only flips true when the visible band (green / yellow / red)
+   * actually changes. With 99 players pinging every 30 s, that's the
+   * difference between ~3 broadcasts/s of churn and a handful per minute.
+   */
   setRtt(connId: string, rtt: number): boolean {
     if (!Number.isFinite(rtt) || rtt < 0 || rtt > 10_000) return false;
     const pid = this.connToPlayer.get(connId);
     if (pid === undefined) return false;
     const entry = this.players.get(pid);
     if (!entry || entry.bot) return false;
-    if (entry.rtt !== null && Math.abs(entry.rtt - rtt) < 10) return false;
+    const oldBand = rttBand(entry.rtt);
+    const newBand = rttBand(rtt);
     this.players.set(pid, { ...entry, rtt: Math.round(rtt) });
-    return true;
+    return oldBand !== newBand;
   }
 
   /**
@@ -708,4 +723,11 @@ export class RoomCore {
 
 const sanitizeName = (raw: string): string => {
   return (raw || '').slice(0, 16).replace(/[^\p{L}\p{N} _-]/gu, '').trim();
+};
+
+const rttBand = (rtt: number | null): 0 | 1 | 2 | 3 => {
+  if (rtt === null) return 0;
+  if (rtt < RTT_BAND_GREEN_MAX) return 1;
+  if (rtt < RTT_BAND_YELLOW_MAX) return 2;
+  return 3;
 };

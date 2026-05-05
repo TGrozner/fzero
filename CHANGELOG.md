@@ -6,6 +6,30 @@ adheres loosely to [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+- **FINISHED phase ticks at 1 Hz** (was 10 Hz). The 8 s cooldown only needs
+  to bleed `finishedFor` — running 10× faster cost ~80 alarm requests per
+  race for nothing. WAITING already ran at 1 Hz; the two slow phases now
+  share the same cadence + dt cap.
+- **`setRtt` broadcast gating is band-based** (green / yellow / red) instead
+  of a flat 10 ms threshold. With 99 players pinging every 30 s, the lobby
+  no longer rebroadcasts the full player list on every micro-jitter; only
+  changes that actually move the visible band trigger a `players` frame.
+  Both client (`Lobby`) and server pull the band thresholds from
+  `RTT_BAND_GREEN_MAX` / `RTT_BAND_YELLOW_MAX` so they stay in sync.
+- **`removeHuman` returns whether anything changed** so the DO only emits a
+  `players` broadcast when the close/error actually corresponded to a known
+  player. webSocketError now also broadcasts (was silent), and a stray
+  second close/error after the first no longer emits an empty frame.
+
+### Fixed
+- **Hardened `decodeInput`** — accepts `unknown` and rejects/clamps NaN,
+  Infinity, out-of-range, wrong-type fields. A hand-crafted `input`
+  message can no longer push NaN throttle/steer into physics.
+- **Server validates `hello` field types** (`name`, `color`, `cls`,
+  `session`) instead of letting deeper code throw on a non-string. Bad
+  hellos now close cleanly with `WS_CLOSE_PROTOCOL_ERROR`.
+
 ### Added
 - **Multiplayer lobby coherence pass.** Single source of authority for global
   decisions, fair process for shared ones:

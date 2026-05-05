@@ -126,17 +126,26 @@ describe('RoomCore lifecycle', () => {
     expect(r.setClass('unknown-conn', 'speed')).toBe(false); // no match
   });
 
-  it('setRtt records valid values, debounces small changes, rejects nonsense', () => {
+  it('setRtt stores fresh values but only broadcasts on band change', () => {
     const r = new RoomCore();
     r.addHuman('c1', 'A', '#3aa0ff');
+    // null → green band: broadcast.
     expect(r.setRtt('c1', 42)).toBe(true);
     expect([...r.players.values()][0]?.rtt).toBe(42);
-    expect(r.setRtt('c1', 47)).toBe(false); // <10 ms change → no broadcast
+    // green → green: no broadcast, but the stored value still updates.
+    expect(r.setRtt('c1', 47)).toBe(false);
+    expect([...r.players.values()][0]?.rtt).toBe(47);
+    // green → red: broadcast.
     expect(r.setRtt('c1', 200)).toBe(true);
-    expect(r.setRtt('c1', -5)).toBe(false); // negative
-    expect(r.setRtt('c1', NaN)).toBe(false); // not finite
-    expect(r.setRtt('c1', 99_999)).toBe(false); // too large
-    expect(r.setRtt('unknown', 100)).toBe(false); // no matching connection
+    // red → red: no broadcast.
+    expect(r.setRtt('c1', 220)).toBe(false);
+    // red → yellow: broadcast.
+    expect(r.setRtt('c1', 100)).toBe(true);
+    // Invalid inputs are rejected outright.
+    expect(r.setRtt('c1', -5)).toBe(false);
+    expect(r.setRtt('c1', NaN)).toBe(false);
+    expect(r.setRtt('c1', 99_999)).toBe(false);
+    expect(r.setRtt('unknown', 100)).toBe(false);
   });
 
   it('setReady is a no-op for an unknown connection', () => {
@@ -174,8 +183,12 @@ describe('RoomCore lifecycle', () => {
   it('removeHuman during WAITING removes the slot', () => {
     const r = new RoomCore();
     r.addHuman('c1', 'A', '#3aa0ff');
-    r.removeHuman('c1');
+    expect(r.removeHuman('c1')).toBe(true);
     expect(r.players.size).toBe(0);
+    // Idempotent: a second call (or a stale connId from webSocketError after
+    // webSocketClose already ran) is a no-op and signals "nothing changed".
+    expect(r.removeHuman('c1')).toBe(false);
+    expect(r.removeHuman('never-connected')).toBe(false);
   });
 
   it('startRace fills with bots up to MAX_RACERS', () => {

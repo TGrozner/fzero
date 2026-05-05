@@ -126,3 +126,12 @@ export const WS_MAX_MESSAGE_BYTES = 1024;
 export const MAX_ROOM_NAME_LEN = 32;
 /** Allowed characters in a room name (alphanumeric, dash, underscore). */
 export const ROOM_NAME_PATTERN = /^[A-Za-z0-9_-]+$/;
+
+/**
+ * RTT display bands (ms). The lobby renders ping in green / yellow / red and
+ * the server uses the same thresholds to decide whether an RTT update is
+ * worth broadcasting — keeps the WS message rate down with 99 players each
+ * pinging every 30 s.
+ */
+export const RTT_BAND_GREEN_MAX = 80;
+export const RTT_BAND_YELLOW_MAX = 180;
