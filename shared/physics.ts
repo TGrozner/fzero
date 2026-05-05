@@ -295,10 +295,6 @@ export const resolveVehicleCollision = (
   restitution = 0.5,
 ): { a: Vehicle; b: Vehicle } => {
   if (a.ko || b.ko) return { a, b };
-  // Skyway pieces ignore collisions.
-  if (a.skywayUntil > 0 || b.skywayUntil > 0) {
-    // We don't know raceTime here; skyway state checked by caller via ignoring outcome if needed.
-  }
   const dx = b.pos.x - a.pos.x;
   const dy = b.pos.y - a.pos.y;
   const dist = Math.hypot(dx, dy);

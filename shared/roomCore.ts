@@ -99,6 +99,8 @@ export class RoomCore {
   totalLaps: number = TOTAL_LAPS;
   config = buildRaceConfig(TRACKS[0] as Track, TOTAL_LAPS);
   players = new Map<string, PlayerEntry>();
+  /** Reverse lookup: connId → playerId for O(1) input routing. */
+  private connToPlayer = new Map<string, string>();
   /** Vehicle id → Vehicle. */
   vehicles = new Map<string, Vehicle>();
   /** Vehicle id → latest input. */
@@ -183,6 +185,7 @@ export class RoomCore {
             rtt: null,
             trackVote: this.track.id,
           });
+          this.connToPlayer.set(connId, pid);
           // Resume normal input processing for this vehicle.
           if (!this.inputs.has(pid)) this.inputs.set(pid, NEUTRAL_INPUT);
           this.lastHumanInputAt = this.raceTime;
@@ -226,6 +229,7 @@ export class RoomCore {
       rtt: null,
       trackVote: this.track.id,
     });
+    this.connToPlayer.set(connId, id);
     // No auto-start by default — players use the Start now button or the
     // per-player Ready flag to trigger the race when they're good to go.
     return {
@@ -246,20 +250,21 @@ export class RoomCore {
 
   /** Remove a player by their connection id. */
   removeHuman(connId: string): void {
-    for (const [pid, entry] of this.players) {
-      if (entry.connId === connId) {
-        if (this.phase === 'WAITING') {
-          // Drop fully if not yet racing.
-          this.players.delete(pid);
-          this.vehicles.delete(pid);
-          this.inputs.delete(pid);
-        } else {
-          // Mid-race: convert to a bot so the race continues without them.
-          // `session` is preserved so the same client can reconnect and
-          // reclaim this vehicle.
-          this.players.set(pid, { ...entry, connId: null, bot: true });
-        }
-      }
+    const pid = this.connToPlayer.get(connId);
+    if (pid === undefined) return;
+    const entry = this.players.get(pid);
+    if (!entry) return;
+    this.connToPlayer.delete(connId);
+    if (this.phase === 'WAITING') {
+      // Drop fully if not yet racing.
+      this.players.delete(pid);
+      this.vehicles.delete(pid);
+      this.inputs.delete(pid);
+    } else {
+      // Mid-race: convert to a bot so the race continues without them.
+      // `session` is preserved so the same client can reconnect and
+      // reclaim this vehicle.
+      this.players.set(pid, { ...entry, connId: null, bot: true });
     }
     const humans = [...this.players.values()].filter((p) => !p.bot).length;
     if (humans === 0) this.startsIn = -1;
@@ -267,11 +272,12 @@ export class RoomCore {
 
   /** Apply input from a connection id to the corresponding player. */
   applyInput(connId: string, input: VehicleInput): void {
-    const entry = [...this.players.values()].find((p) => p.connId === connId);
-    if (!entry) return;
-    this.inputs.set(entry.id, input);
+    const pid = this.connToPlayer.get(connId);
+    if (pid === undefined) return;
+    this.inputs.set(pid, input);
     // Track activity so we can auto-abandon idle rooms (DO requests aren't free).
-    if (!entry.bot) this.lastHumanInputAt = this.raceTime;
+    const entry = this.players.get(pid);
+    if (entry && !entry.bot) this.lastHumanInputAt = this.raceTime;
   }
 
   /** Force start the race (e.g. countdown auto-start). Fills with bots up to MAX_RACERS. */
@@ -454,34 +460,13 @@ export class RoomCore {
       // Auto-abandon: free DO budget when no human is interacting.
       const humansLeft = [...this.players.values()].filter((p) => !p.bot).length;
       const idleSecs = this.raceTime - this.lastHumanInputAt;
-      if (humansLeft === 0 || idleSecs > this.noInputAbandonS) {
-        this.phase = 'FINISHED';
-        this.finishedFor = 0;
+      if (
+        humansLeft === 0 ||
+        idleSecs > this.noInputAbandonS ||
+        isRaceOver(postPickup, this.config.totalLaps)
+      ) {
         finishedNow = true;
-        events.push({ type: 'phase', phase: 'FINISHED' });
-        events.push({
-          type: 'results',
-          standings: standings(postPickup).map((s) => ({
-            id: s.id,
-            position: s.position,
-            finishTime: s.finishTime,
-            ko: s.ko,
-          })),
-        });
-      } else if (isRaceOver(postPickup, this.config.totalLaps)) {
-        this.phase = 'FINISHED';
-        this.finishedFor = 0;
-        finishedNow = true;
-        events.push({ type: 'phase', phase: 'FINISHED' });
-        events.push({
-          type: 'results',
-          standings: standings(postPickup).map((s) => ({
-            id: s.id,
-            position: s.position,
-            finishTime: s.finishTime,
-            ko: s.ko,
-          })),
-        });
+        this.emitFinish(events, postPickup);
       }
     }
 
@@ -505,11 +490,28 @@ export class RoomCore {
     return { snapshot, events, finishedNow };
   }
 
+  /** Transition to FINISHED and emit results. */
+  private emitFinish(events: ServerMessage[], vehicles: readonly Vehicle[]): void {
+    this.phase = 'FINISHED';
+    this.finishedFor = 0;
+    events.push({ type: 'phase', phase: 'FINISHED' });
+    events.push({
+      type: 'results',
+      standings: standings(vehicles).map((s) => ({
+        id: s.id,
+        position: s.position,
+        finishTime: s.finishTime,
+        ko: s.ko,
+      })),
+    });
+  }
+
   /** Wipe race state and return to WAITING. Called automatically after FINISHED cooldown,
    *  or by the DO wrapper when a fresh client tries to join a finished room. */
   resetToWaiting(): void {
     this.phase = 'WAITING';
     this.players.clear();
+    this.connToPlayer.clear();
     this.vehicles.clear();
     this.inputs.clear();
     this.raceTime = 0;
@@ -548,10 +550,8 @@ export class RoomCore {
 
   /** True if `connId` corresponds to the current host. */
   isHost(connId: string): boolean {
-    const host = this.hostId();
-    if (host === null) return false;
-    const entry = this.players.get(host);
-    return entry?.connId === connId;
+    const pid = this.connToPlayer.get(connId);
+    return pid !== undefined && pid === this.hostId();
   }
 
   /**
@@ -582,14 +582,13 @@ export class RoomCore {
   /** Update a player's reported RTT. No-op if rtt change is below 10 ms. */
   setRtt(connId: string, rtt: number): boolean {
     if (!Number.isFinite(rtt) || rtt < 0 || rtt > 10_000) return false;
-    for (const [pid, entry] of this.players) {
-      if (entry.connId === connId && !entry.bot) {
-        if (entry.rtt !== null && Math.abs(entry.rtt - rtt) < 10) return false;
-        this.players.set(pid, { ...entry, rtt: Math.round(rtt) });
-        return true;
-      }
-    }
-    return false;
+    const pid = this.connToPlayer.get(connId);
+    if (pid === undefined) return false;
+    const entry = this.players.get(pid);
+    if (!entry || entry.bot) return false;
+    if (entry.rtt !== null && Math.abs(entry.rtt - rtt) < 10) return false;
+    this.players.set(pid, { ...entry, rtt: Math.round(rtt) });
+    return true;
   }
 
   /**
@@ -598,11 +597,10 @@ export class RoomCore {
    */
   setReady(connId: string, ready: boolean): { allReady: boolean; humans: number } {
     if (this.phase !== 'WAITING') return { allReady: false, humans: 0 };
-    for (const [pid, entry] of this.players) {
-      if (entry.connId === connId && !entry.bot) {
-        this.players.set(pid, { ...entry, ready });
-        break;
-      }
+    const pid = this.connToPlayer.get(connId);
+    if (pid !== undefined) {
+      const entry = this.players.get(pid);
+      if (entry && !entry.bot) this.players.set(pid, { ...entry, ready });
     }
     const humans = [...this.players.values()].filter((p) => !p.bot);
     return {
@@ -624,20 +622,16 @@ export class RoomCore {
     } catch {
       return { voteRecorded: false, trackChanged: false };
     }
-    let voteRecorded = false;
-    for (const [pid, entry] of this.players) {
-      if (entry.connId === connId && !entry.bot) {
-        if (entry.trackVote === trackId) return { voteRecorded: false, trackChanged: false };
-        this.players.set(pid, { ...entry, trackVote: trackId });
-        voteRecorded = true;
-        break;
-      }
-    }
-    if (!voteRecorded) return { voteRecorded: false, trackChanged: false };
+    const pid = this.connToPlayer.get(connId);
+    if (pid === undefined) return { voteRecorded: false, trackChanged: false };
+    const entry = this.players.get(pid);
+    if (!entry || entry.bot) return { voteRecorded: false, trackChanged: false };
+    if (entry.trackVote === trackId) return { voteRecorded: false, trackChanged: false };
+    this.players.set(pid, { ...entry, trackVote: trackId });
     const winner = this.tallyTrackWinner();
-    if (winner === this.track.id) return { voteRecorded, trackChanged: false };
+    if (winner === this.track.id) return { voteRecorded: true, trackChanged: false };
     this.applyTrack(winner);
-    return { voteRecorded, trackChanged: true };
+    return { voteRecorded: true, trackChanged: true };
   }
 
   /**
@@ -675,14 +669,13 @@ export class RoomCore {
   setClass(connId: string, cls: ShipClass): boolean {
     if (this.phase !== 'WAITING') return false;
     if (!SHIP_CLASSES.includes(cls)) return false;
-    for (const [pid, entry] of this.players) {
-      if (entry.connId === connId && !entry.bot) {
-        if (entry.cls === cls) return false;
-        this.players.set(pid, { ...entry, cls });
-        return true;
-      }
-    }
-    return false;
+    const pid = this.connToPlayer.get(connId);
+    if (pid === undefined) return false;
+    const entry = this.players.get(pid);
+    if (!entry || entry.bot) return false;
+    if (entry.cls === cls) return false;
+    this.players.set(pid, { ...entry, cls });
+    return true;
   }
 
   snapshotShips(): ShipSnapshot[] {

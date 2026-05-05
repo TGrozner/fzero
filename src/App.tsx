@@ -83,17 +83,19 @@ const loadProfile = (): Profile => {
 };
 
 export function App() {
-  const profile = loadProfile();
-  const [state, dispatch] = useReducer(reducer, undefined, () => ({
-    ...buildInitialClientState(),
-    pseudo: profile.pseudo,
-    color: profile.color,
-    trackId: profile.trackId,
-    cls: profile.cls,
-    roomName: profile.roomName,
-    volume: profile.volume,
-    music: profile.music,
-  }));
+  const [state, dispatch] = useReducer(reducer, undefined, () => {
+    const profile = loadProfile();
+    return {
+      ...buildInitialClientState(),
+      pseudo: profile.pseudo,
+      color: profile.color,
+      trackId: profile.trackId,
+      cls: profile.cls,
+      roomName: profile.roomName,
+      volume: profile.volume,
+      music: profile.music,
+    };
+  });
   const [connectRequested, setConnectRequested] = useState(false);
   const [connectAsSpectator, setConnectAsSpectator] = useState(false);
   const lastRecordedResultsRef = useRef<readonly unknown[] | null>(null);

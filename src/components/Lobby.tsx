@@ -63,9 +63,13 @@ const trackName = (id: string): string =>
  * same DO. If the user didn't pick a room, we generate a stable one from
  * the current ms timestamp so the URL is meaningful right away.
  */
+/** Stable fallback room name — computed once per page load so repeated
+ *  clicks on "Copy invite" always produce the same URL. */
+const fallbackRoom = `room-${Date.now().toString(36)}`;
+
 const buildInviteUrl = (room: string): string => {
   if (typeof window === 'undefined') return '';
-  const r = room || `room-${Date.now().toString(36)}`;
+  const r = room || fallbackRoom;
   const url = new URL(window.location.href);
   url.searchParams.set('room', r);
   url.searchParams.delete('profile');
