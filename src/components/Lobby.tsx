@@ -9,6 +9,7 @@ type Props = {
   startsIn: number;
   roomName: string;
   onCancel: () => void;
+  onStartNow: () => void;
 };
 
 /**
@@ -27,7 +28,7 @@ const buildInviteUrl = (room: string): string => {
   return url.toString();
 };
 
-export function Lobby({ trackId, players, startsIn, roomName, onCancel }: Props) {
+export function Lobby({ trackId, players, startsIn, roomName, onCancel, onStartNow }: Props) {
   const track = TRACKS.find((t) => t.id === trackId);
   const startsInDisplay = startsIn >= 0 ? Math.ceil(startsIn) : null;
   const humans = players.filter((p) => !p.bot);
@@ -94,7 +95,15 @@ export function Lobby({ trackId, players, startsIn, roomName, onCancel }: Props)
           </li>
         ))}
       </ul>
-      <div style={{ display: 'flex', gap: 10, justifyContent: 'center' }}>
+      <div style={{ display: 'flex', gap: 10, justifyContent: 'center', flexWrap: 'wrap' }}>
+        <button
+          onClick={onStartNow}
+          data-testid="start-now"
+          style={{ minWidth: 140 }}
+          disabled={startsInDisplay !== null && startsInDisplay <= 1}
+        >
+          Start now
+        </button>
         <button
           onClick={onCopyInvite}
           data-testid="copy-invite"

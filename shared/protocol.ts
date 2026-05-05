@@ -48,7 +48,8 @@ export type PlayerInfoMsg = {
 export type ClientMessage =
   | { type: 'hello'; name: string; color: string; cls?: ShipClass; session?: string }
   | { type: 'input'; ts: number; in: InputBits }
-  | { type: 'ping'; ts: number };
+  | { type: 'ping'; ts: number }
+  | { type: 'start_now' };
 
 /** Encoded input as a tiny bit/short tuple. */
 export type InputBits = {

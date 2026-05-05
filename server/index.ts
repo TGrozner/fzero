@@ -223,6 +223,16 @@ export class Room {
       ws.send(encode({ type: 'pong', ts: msg.ts }));
       return;
     }
+    if (msg.type === 'start_now') {
+      // Any human in the room can fast-forward the lobby. The auto-start
+      // timer remains as the default safety net for randoms in `lobby`.
+      if (this.core.phase !== 'WAITING') return;
+      this.core.startsIn = 0;
+      this.broadcast({ type: 'phase', phase: 'WAITING', startsIn: 0 });
+      // Tick now instead of waiting up to a full WAITING beat (1 Hz).
+      void this.state.storage.setAlarm(Date.now() + 50);
+      return;
+    }
   }
 
   webSocketClose(ws: WebSocket, _code: number, _reason: string, _wasClean: boolean): void {

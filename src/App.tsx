@@ -209,6 +209,7 @@ export function App() {
           startsIn={state.startsIn}
           roomName={state.roomName}
           onCancel={handleLeave}
+          onStartNow={() => socket.send({ type: 'start_now' })}
         />
       )}
       {state.view === 'race' && (
