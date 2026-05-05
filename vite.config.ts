@@ -5,9 +5,9 @@ export default defineConfig({
   plugins: [react()],
   build: {
     target: 'es2022',
-    // 'hidden' emits maps but does NOT reference them in bundles, so prod users
-    // can't view source via devtools while we keep maps for error-tracking uploads.
-    sourcemap: 'hidden',
+    // No sourcemaps in prod — without an error-tracking pipeline to consume them
+    // privately, 'hidden' still leaves them fetchable at <bundle>.map on Pages.
+    sourcemap: false,
     rollupOptions: {
       output: {
         manualChunks: (id) => {
