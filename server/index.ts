@@ -449,10 +449,19 @@ export class Room {
     }
     if (out.snapshot) this.broadcast(out.snapshot);
     for (const ev of out.events) this.broadcast(ev);
-    // Reschedule unless the room is fully idle (no sockets AND back in WAITING).
+    // Reschedule only when there's actual work for the next tick. The
+    // previous rule ("any sockets connected OR not WAITING") burned a 1 Hz
+    // alarm forever on any idle-lobby tab — step() in WAITING with
+    // startsIn<0 is a no-op, so a single forgotten tab cost ~86 k DO
+    // requests/day and ate the free tier overnight (issue #1, 2026-05-06).
+    // Transitions out of WAITING (set_ready, start_now, ?fast=1) all set
+    // the alarm explicitly via setAlarm(now+50), so we don't need a
+    // standing tick to detect them.
     const sockets = this.state.getWebSockets();
-    const empty = sockets.length === 0 && this.core.phase === 'WAITING';
-    if (!empty) {
+    const idleWaiting = this.core.phase === 'WAITING' && this.core.startsIn < 0;
+    const orphanedFinished = this.core.phase === 'FINISHED' && sockets.length === 0;
+    const idle = idleWaiting || orphanedFinished;
+    if (!idle) {
       const slowAfter = this.core.phase === 'WAITING' || this.core.phase === 'FINISHED';
       const nextMs = slowAfter ? 1000 : SERVER_TICK_MS;
       await this.state.storage.setAlarm(now + nextMs);
