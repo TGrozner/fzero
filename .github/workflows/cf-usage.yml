@@ -44,6 +44,16 @@ jobs:
           echo '```json' >> "$GITHUB_STEP_SUMMARY"
           cat usage.json >> "$GITHUB_STEP_SUMMARY"
           echo '```' >> "$GITHUB_STEP_SUMMARY"
+      - name: Ensure cf-usage label exists
+        if: steps.usage.outputs.alert == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          gh label create cf-usage \
+            --description "Cloudflare free-tier usage alert (auto-opened by cf-usage workflow)" \
+            --color B60205 \
+            --force
       - name: Find existing alert issue
         if: steps.usage.outputs.alert == 'true'
         id: existing
